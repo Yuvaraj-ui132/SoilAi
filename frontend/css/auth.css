@@ -214,3 +214,36 @@
   .auth-brand { display: none; }
   .auth-form-panel { padding: 32px 20px; min-height: 100vh; }
 }
+
+/* Keep authentication pages in the same calm visual system as the app. */
+.auth-brand {
+  background: linear-gradient(155deg, #e8eee5 0%, #f5f6f1 100%);
+}
+.auth-brand::before { display: none; }
+.brand-orb-1, .brand-orb-2 { display: none; }
+.brand-icon {
+  background: #496b52;
+  box-shadow: none;
+}
+.brand-name, .brand-headline, .feat-text h4 { color: #26372d; }
+.brand-headline span { color: #496b52; }
+.brand-tagline, .brand-sub, .brand-footer { color: #627166; }
+.brand-feature {
+  background: rgba(255, 255, 255, 0.72);
+  border-color: #dce4da;
+}
+.brand-badge { background: #edf5ed; border-color: #d4e5d3; color: #456e4b; }
+.auth-form-panel { background: #f5f6f1; }
+.auth-form-title { color: #26372d; }
+.auth-form-subtitle, .auth-footer { color: #627166; }
+.password-toggle { color: #758279; }
+.password-toggle:hover { color: #496b52; }
+.error-msg { color: #a64f45; }
+#success-toast { background: #edf5ed; border-color: #d4e5d3; color: #456e4b; }
+#form-error { background: #fbefed; border-color: #eed5d1; color: #9e4c43; }
+.auth-divider { color: #758279; }
+.auth-divider::before, .auth-divider::after { background: #dce4da; }
+.auth-link { color: #496b52; }
+.auth-link:hover { color: #38563f; }
+.terms-check { color: #627166; }
+.terms-check input[type="checkbox"] { accent-color: #496b52; }

@@ -1,15 +1,16 @@
 import { auth, db } from './firebase-config.js';
 import { collection, query, where, onSnapshot } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
+import { canRunComparison, groupTestsBySavedDate, savedDateInfo } from './compare-utils.mjs';
 
 let allTests = [];
 let selectedTests = [];
 let compareChart = null;
 
 const CHART_COLORS = [
-  { border: '#10b981', bg: 'rgba(16, 185, 129, 0.1)' }, // Emerald
-  { border: '#3b82f6', bg: 'rgba(59, 130, 246, 0.1)' }, // Blue
-  { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.1)' }  // Amber
+  { border: '#527a5c', bg: 'rgba(82, 122, 92, 0.1)' },
+  { border: '#496b52', bg: 'rgba(73, 107, 82, 0.1)' },
+  { border: '#9a6a2f', bg: 'rgba(154, 106, 47, 0.1)' }
 ];
 
 function escapeHTML(value) {
@@ -39,14 +40,8 @@ function fetchSavedTests(uid) {
   onSnapshot(q, (snap) => {
     allTests = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       .filter(t => t.results && t.results.omc && t.results.mdd); // Only tests with results
+    selectedTests = selectedTests.filter(id => allTests.some(test => test.id === id));
     
-    // Sort by newest
-    allTests.sort((a, b) => {
-      const ta = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
-      const tb = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
-      return tb - ta;
-    });
-
     renderSiteSelector();
   }, (err) => {
     console.error("Error fetching tests:", err);
@@ -58,27 +53,56 @@ function fetchSavedTests(uid) {
 function renderSiteSelector() {
   const container = document.getElementById('site-selector');
   if (allTests.length === 0) {
-    container.innerHTML = '<div style="color:#94a3b8;padding:20px;grid-column:1/-1;text-align:center;">No valid Proctor tests found. Run tests first.</div>';
+    container.innerHTML = `
+      <div class="site-selector-empty">
+        <strong>No saved tests available to compare</strong>
+        Save a Proctor test with calculated results, then return here to compare sites.
+        <a href="/proctor">Create a Proctor test</a>
+      </div>
+    `;
+    syncSelectionUI();
     return;
   }
 
-  container.innerHTML = allTests.map(test => {
-    const dateStr = test.createdAt?.toDate ? test.createdAt.toDate().toLocaleDateString() : 'Unknown Date';
-    return `
-      <div class="site-card" data-id="${escapeHTML(test.id)}">
-        <div style="font-weight:700;color:#e2e8f0;margin-bottom:6px">${escapeHTML(test.testName || 'Untitled')}</div>
-        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">📍 ${escapeHTML(test.location || 'Unknown Location')}</div>
-        <div style="font-size:11px;color:#94a3b8">📅 ${dateStr}</div>
-        <div style="margin-top:10px;display:flex;gap:10px;">
-          <span style="font-size:11px;background:rgba(59,130,246,0.15);color:#60a5fa;padding:2px 6px;border-radius:4px;">MDD: ${test.results.mdd.toFixed(2)}</span>
-          <span style="font-size:11px;background:rgba(16,185,129,0.15);color:#34d399;padding:2px 6px;border-radius:4px;">OMC: ${test.results.omc.toFixed(1)}%</span>
+  container.innerHTML = groupTestsBySavedDate(allTests).map(group => `
+    <section class="site-date-group" aria-labelledby="site-date-${escapeHTML(group.key)}">
+      <h3 class="site-date-heading" id="site-date-${escapeHTML(group.key)}">${escapeHTML(group.label)}</h3>
+      <div class="site-date-cards">${group.tests.map(test => `
+      <div class="site-card" data-id="${escapeHTML(test.id)}" role="button" tabindex="0" aria-pressed="false">
+        <div class="site-card-name">${escapeHTML(test.testName || 'Untitled')}</div>
+        <div class="site-card-meta"><span class="site-card-meta-icon" aria-hidden="true">📍</span><span>${escapeHTML(test.location || 'Unknown Location')}</span></div>
+        <div class="site-card-meta"><span class="site-card-meta-icon" aria-hidden="true">📅</span><span>${escapeHTML(savedDateInfo(test.createdAt)?.label || 'Date unavailable')}</span></div>
+        <div class="site-card-metrics">
+          <span class="site-card-metric">MDD: ${test.results.mdd.toFixed(2)}</span>
+          <span class="site-card-metric">OMC: ${test.results.omc.toFixed(1)}%</span>
         </div>
       </div>
-    `;
-  }).join('');
+      `).join('')}</div>
+    </section>
+  `).join('');
   container.querySelectorAll('.site-card').forEach(card => {
+    const isSelected = selectedTests.includes(card.dataset.id);
+    card.classList.toggle('selected', isSelected);
+    card.setAttribute('aria-pressed', String(isSelected));
     card.addEventListener('click', () => window.toggleSiteSelection(card.dataset.id));
+    card.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        window.toggleSiteSelection(card.dataset.id);
+      }
+    });
   });
+  syncSelectionUI();
+}
+
+function syncSelectionUI() {
+  const selectedCount = selectedTests.length;
+  const compareButton = document.getElementById('run-compare-btn');
+  const selectionHint = document.getElementById('selection-hint');
+  document.getElementById('selection-counter').textContent = `${selectedCount} of 3 selected`;
+  compareButton.disabled = !canRunComparison(selectedCount);
+  selectionHint.hidden = canRunComparison(selectedCount);
+  if (!selectionHint.hidden) selectionHint.textContent = 'Select exactly 3 sites to compare.';
 }
 
 window.toggleSiteSelection = (id) => {
@@ -94,20 +118,25 @@ window.toggleSiteSelection = (id) => {
     }
     selectedTests.push(id);
     card.classList.add('selected');
+    card.setAttribute('aria-pressed', 'true');
   } else {
     selectedTests.splice(index, 1);
     card.classList.remove('selected');
+    card.setAttribute('aria-pressed', 'false');
   }
 
-  document.getElementById('selection-counter').textContent = `${selectedTests.length} / 3 Selected`;
-  document.getElementById('run-compare-btn').disabled = selectedTests.length < 2;
+  syncSelectionUI();
 };
 
 // ── Comparative Analysis Logic ───────────────────────────────────────────
 document.getElementById('run-compare-btn').addEventListener('click', runComparison);
 
 function runComparison() {
-  if (selectedTests.length < 2) return;
+  if (!canRunComparison(selectedTests.length)) {
+    showToast('Select exactly 3 sites to run the comparison.', 'warning');
+    syncSelectionUI();
+    return;
+  }
   
   // Get full objects
   const testsToCompare = selectedTests.map(id => allTests.find(t => t.id === id));
@@ -203,7 +232,7 @@ function renderComparisonChart(tests) {
       borderWidth: 3,
       tension: 0.4,
       pointRadius: 4,
-      pointBackgroundColor: '#0f172a',
+      pointBackgroundColor: '#fff',
       pointBorderWidth: 2,
       fill: true
     };
@@ -214,8 +243,8 @@ function renderComparisonChart(tests) {
     return {
       label: `${test.testName} (Peak)`,
       data: [{ x: test.results.omc, y: test.results.mdd }],
-      borderColor: '#fbbf24',
-      backgroundColor: '#f59e0b',
+      borderColor: '#9a6a2f',
+      backgroundColor: '#b67d35',
       borderWidth: 2,
       pointRadius: 8,
       pointStyle: 'star',
@@ -230,12 +259,12 @@ function renderComparisonChart(tests) {
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { labels: { color: '#cbd5e1', font: { family: 'Inter' } } },
+        legend: { labels: { color: '#526358', font: { family: 'Inter' } } },
         tooltip: {
-          backgroundColor: 'rgba(15, 23, 42, 0.9)',
-          titleColor: '#f8fafc',
-          bodyColor: '#cbd5e1',
-          borderColor: 'rgba(59, 130, 246, 0.3)',
+          backgroundColor: 'rgba(38, 55, 45, 0.96)',
+          titleColor: '#ffffff',
+          bodyColor: '#e3ebe3',
+          borderColor: 'rgba(73, 107, 82, 0.45)',
           borderWidth: 1,
           padding: 12
         }
@@ -243,14 +272,14 @@ function renderComparisonChart(tests) {
       scales: {
         x: {
           type: 'linear',
-          title: { display: true, text: 'Moisture Content (%)', color: '#94a3b8' },
-          grid: { color: 'rgba(59, 130, 246, 0.1)' },
-          ticks: { color: '#94a3b8' }
+          title: { display: true, text: 'Moisture Content (%)', color: '#526358' },
+          grid: { color: 'rgba(73, 107, 82, 0.12)' },
+          ticks: { color: '#526358' }
         },
         y: {
-          title: { display: true, text: 'Dry Density (g/cc)', color: '#94a3b8' },
-          grid: { color: 'rgba(59, 130, 246, 0.1)' },
-          ticks: { color: '#94a3b8' }
+          title: { display: true, text: 'Dry Density (g/cc)', color: '#526358' },
+          grid: { color: 'rgba(73, 107, 82, 0.12)' },
+          ticks: { color: '#526358' }
         }
       }
     }

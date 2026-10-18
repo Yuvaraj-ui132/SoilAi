@@ -1,8 +1,9 @@
 import { auth, db, COLLECTIONS } from './firebase-config.js';
 import {
-  collection, addDoc, serverTimestamp
+  collection, addDoc, serverTimestamp, doc, getDoc
 } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
+import { downloadReportPdf, viewReportPdf } from './report-actions.mjs';
 
 let currentUser = null;
 let trialCount = 0;
@@ -43,7 +44,7 @@ window.addTrial = () => {
       <span id="trial-status-${num}" class="trial-calc-status" style="display:none"></span>
       <button class="btn btn-ghost btn-sm remove-trial-btn" onclick="removeTrial(${num})" style="margin-left:auto;color:#f87171" title="Remove Trial">✕</button>
     </div>
-    <div class="trial-fields" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:14px;margin-bottom:12px">
+    <div class="trial-fields">
       <div class="form-group">
         <label style="font-size:11px;font-weight:600;color:#64748b">W1 (Empty, g)</label>
         <input type="number" id="W1-${num}" class="form-input trial-input" placeholder="e.g. 25.0" step="0.01" min="0">
@@ -604,12 +605,22 @@ window.runFullAnalysis = async () => {
       results: { omc, mdd, average_moisture_content: avgMc, average_dry_density: avgDd, status: 'calculated', trial_count: trials.length },
       createdAt: serverTimestamp()
     };
-    await addDoc(collection(db, 'soilTests'), payload);
+    const savedTest = await addDoc(collection(db, 'soilTests'), payload);
+    lastResults.testId = savedTest.id;
+    try {
+      const savedSnapshot = await getDoc(doc(db, 'soilTests', savedTest.id));
+      if (savedSnapshot.exists()) lastResults.createdAt = savedSnapshot.data().createdAt;
+    } catch (timestampError) {
+      console.error('Could not retrieve the saved test timestamp for its report:', timestampError);
+    }
     showToast('Analysis complete & saved to cloud!', 'success');
   } catch(e) {
     showToast('Saved locally, Firestore sync failed', 'warning');
     console.error(e);
   }
+  lastResults.reportReady = true;
+  document.getElementById('view-report-btn').disabled = false;
+  document.getElementById('download-report-btn').disabled = false;
   
   btn.disabled = false;
   btn.innerHTML = '⚡ Run Complete Compaction Analysis';
@@ -651,8 +662,8 @@ function renderChart(trials, omc, mdd) {
   }
 
   const gradient = ctx.createLinearGradient(0,0,0,400);
-  gradient.addColorStop(0, 'rgba(59,130,246,0.2)');
-  gradient.addColorStop(1, 'rgba(59,130,246,0.0)');
+  gradient.addColorStop(0, 'rgba(73,107,82,0.2)');
+  gradient.addColorStop(1, 'rgba(73,107,82,0.0)');
   
   chartInstance = new Chart(ctx, {
     type: 'scatter',
@@ -673,7 +684,7 @@ function renderChart(trials, omc, mdd) {
           label: 'Fitted Compaction Curve',
           data: curveData,
           type: 'line',
-          borderColor: '#3b82f6',
+          borderColor: '#496b52',
           backgroundColor: gradient,
           borderWidth: 3,
           tension: 0.4,
@@ -684,7 +695,7 @@ function renderChart(trials, omc, mdd) {
         {
           label: 'Trial Data Points',
           data: scatterData,
-          backgroundColor: '#3b82f6',
+          backgroundColor: '#496b52',
           pointRadius: 6,
           pointHoverRadius: 10,
           order: 1
@@ -692,7 +703,7 @@ function renderChart(trials, omc, mdd) {
         {
           label: 'OMC/MDD Peak',
           data: [{ x: omc, y: mdd }],
-          backgroundColor: '#fbbf24',
+          backgroundColor: '#b67d35',
           pointRadius: 10,
           pointStyle: 'star',
           order: 0
@@ -705,7 +716,7 @@ function renderChart(trials, omc, mdd) {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: 'rgba(15,23,42,0.9)',
+          backgroundColor: 'rgba(38,55,45,0.96)',
           callbacks: {
             label: (item) => `${item.dataset.label}: (${item.parsed.x.toFixed(2)}%, ${item.parsed.y.toFixed(3)} g/cc)`
           }
@@ -714,16 +725,16 @@ function renderChart(trials, omc, mdd) {
       scales: {
         x: { 
           type: 'linear',
-          title: { display: true, text: 'Moisture Content (%)', color: '#94a3b8' },
-          grid: { color: 'rgba(255,255,255,0.05)' }, 
-          ticks: { color: '#64748b' },
+          title: { display: true, text: 'Moisture Content (%)', color: '#526358' },
+          grid: { color: 'rgba(73,107,82,0.12)' },
+          ticks: { color: '#526358' },
           suggestedMin: Math.max(0, trials[0].mc - 2),
           suggestedMax: trials[trials.length - 1].mc + 2
         },
         y: {
-          title: { display: true, text: 'Dry Density (g/cc)', color: '#94a3b8' },
-          grid: { color: 'rgba(255,255,255,0.05)' },
-          ticks: { color: '#64748b', callback: v => v.toFixed(3) },
+          title: { display: true, text: 'Dry Density (g/cc)', color: '#526358' },
+          grid: { color: 'rgba(73,107,82,0.12)' },
+          ticks: { color: '#526358', callback: v => v.toFixed(3) },
           // Dynamic range: pad 0.08 below/above actual data so curve is never clipped
           min: Math.max(0, parseFloat((Math.min(...trials.map(t => t.dd)) - 0.12).toFixed(2))),
           max: parseFloat((Math.max(...trials.map(t => t.dd)) + 0.12).toFixed(2))
@@ -746,7 +757,7 @@ function renderChart(trials, omc, mdd) {
     
     ctx.save();
     ctx.setLineDash([5, 5]);
-    ctx.strokeStyle = '#fbbf24';
+    ctx.strokeStyle = '#b67d35';
     ctx.lineWidth = 1;
     
     // Vertical Line
@@ -762,7 +773,7 @@ function renderChart(trials, omc, mdd) {
     ctx.stroke();
     
     // Labels
-    ctx.fillStyle = '#fbbf24';
+    ctx.fillStyle = '#b67d35';
     ctx.font = '10px Inter';
     ctx.fillText(`OMC: ${omc.toFixed(2)}%`, xPos + 5, yAxis.bottom - 5);
     ctx.fillText(`MDD: ${mdd.toFixed(3)}`, xAxis.left + 5, yPos - 5);
@@ -772,50 +783,26 @@ function renderChart(trials, omc, mdd) {
 }
 
 // ── PDF Export ───────────────────────────────────────────────
-window.generatePDF = () => {
-  if (!lastResults) return;
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const m = 20; let y = 20;
-  
-  doc.setFillColor(15,23,42); doc.rect(0,0,210,36,'F');
-  doc.setTextColor(255,255,255); doc.setFont('helvetica','bold'); doc.setFontSize(16);
-  doc.text('Standard Proctor Compaction Test Report', m, 16);
-  doc.setFontSize(10); doc.setTextColor(148,163,184); doc.setFont('helvetica','normal');
-  doc.text(`Test: ${lastResults.testName} | Location: ${lastResults.location} | Soil: ${lastResults.soilType}`, m, 26);
-  
-  y = 50;
-  doc.setTextColor(15,23,42); doc.setFont('helvetica','bold'); doc.setFontSize(12);
-  doc.text('Key Results', m, y); y += 6;
-  doc.setFontSize(10); doc.setFont('helvetica','normal');
-  doc.text(`Optimum Moisture Content (OMC): ${lastResults.omc.toFixed(2)} %`, m, y); y += 6;
-  doc.text(`Maximum Dry Density (MDD): ${lastResults.mdd.toFixed(3)} g/cc`, m, y); y += 12;
-  
-  doc.setFont('helvetica','bold'); doc.setFontSize(12);
-  doc.text('Trial Data', m, y); y += 6;
-  doc.setFontSize(9);
-  
-  const headers = ['Trial','W1(g)','W2(g)','W3(g)','Wet Den','MC(%)','Dry Den'];
-  let cx = m; headers.forEach(h => { doc.text(h,cx,y); cx+=24; }); y += 6;
-  doc.setFont('helvetica','normal');
-  lastResults.trials.forEach((t, i) => {
-    cx = m;
-    [i+1, t.W1, t.W2, t.W3, t.WD, t.mc.toFixed(2), t.dd.toFixed(3)].forEach(v => { doc.text(String(v),cx,y); cx+=24; });
-    y += 6;
-  });
-  
-  // Graph Image
-  const canvas = document.getElementById('compaction-chart');
-  if (canvas) {
-    const imgData = canvas.toDataURL('image/png');
-    y += 10;
-    if (y > 200) { doc.addPage(); y = 20; }
-    doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.text('Compaction Curve', m, y); y += 6;
-    doc.addImage(imgData, 'PNG', m, y, 170, 80);
+async function runReportAction(action) {
+  if (!lastResults) {
+    showToast('Run a compaction analysis before exporting a report.', 'warning');
+    return;
   }
-  
-  doc.save(`Proctor_Report_${Date.now()}.pdf`);
-};
+  if (!lastResults.reportReady) {
+    showToast('Wait for the test save to finish before generating its report.', 'warning');
+    return;
+  }
+  try {
+    await action(lastResults);
+    showToast('PDF report ready.', 'success');
+  } catch (error) {
+    console.error('PDF report action failed:', error);
+    showToast(error.message || 'Could not generate the PDF report.', 'warning');
+  }
+}
+
+window.viewReport = () => runReportAction(viewReportPdf);
+window.generatePDF = () => runReportAction(downloadReportPdf);
 
 window.exportChartPNG = () => {
   const canvas = document.getElementById('compaction-chart');

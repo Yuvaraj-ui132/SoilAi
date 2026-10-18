@@ -25,7 +25,7 @@ Cloud Firestore and require network access to Firebase.
 | 🤖 Soil screening | Local Random Forest estimator and deterministic USCS/rules output |
 | 📊 Charts | Moisture Content vs Dry Density curve, fitted curve, and ZAV boundary |
 | ☁️ Cloud features | Firebase Authentication and owner-scoped Firestore records |
-| 📄 PDF Reports | Local backend-generated Proctor PDF; Firebase report pages retain jsPDF |
+| 📄 PDF Reports | Shared backend-generated Proctor PDF for Proctor Test and Firebase ReportNav |
 
 ---
 
@@ -139,8 +139,12 @@ external frontend assets; they are not fully offline.
 
 Flask serves the `frontend/` directory as static files. In the Firebase-hosted
 frontend, the Soil Test page's `soilai-api-base-url` meta tag points to the
-Render API at `https://soilai.onrender.com`. For a local Flask-hosted workflow,
-the same-origin API URL can be used by leaving this value empty.
+Render API at `https://soilai.onrender.com`. For local Proctor PDF actions, open
+`http://127.0.0.1:5000/proctor.html?apiBase=local`. For ReportNav, open
+`http://127.0.0.1:5000/reports.html?apiBase=local`. These local-only overrides
+use the same-origin Flask API; without the override, both pages use the
+configured Render API URL. The override is accepted only on `localhost` and
+`127.0.0.1`, and does not change the production API URL or CORS configuration.
 
 ### Local Engineering API
 
@@ -149,7 +153,8 @@ the same-origin API URL can be used by leaving this value empty.
   quadratic fit, OMC/MDD, ZAV curve, and deterministic recommendations.
 - `POST /api/predict` — estimate OMC/MDD from liquid and plastic limits and
   return a USCS/rules-based screening verdict.
-- `POST /api/export-pdf` — generate a PDF from a calculated test payload.
+- `POST /api/export-pdf` — generate a PDF from a calculated test payload;
+  `?disposition=inline` serves that same PDF for browser viewing.
 - `GET /api/sample-data` — return legacy example trial data.
 - `GET /api/system-info` — report local application components.
 

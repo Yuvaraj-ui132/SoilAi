@@ -248,3 +248,328 @@
 /* ── Report fix - ensure loading goes away ──────────────────── */
 .reports-spinner { text-align:center; padding:60px 20px; color:#475569; }
 .reports-empty   { padding:60px; text-align:center; }
+
+/* Shared light-theme treatment for dashboard, comparison, and trial graphs. */
+.trial-result-panel, .trial-result-item, .analytics-card, .graph-card {
+  background: #fff;
+  border-color: #dce4da;
+  box-shadow: 0 2px 10px rgba(35, 53, 40, 0.035);
+}
+.trial-result-item { background: #f8faf6; }
+.trial-result-item .tri-label, .ac-label, .ac-unit,
+.graph-card-subtitle, .legend-item, .omc-box .label, .mdd-box .label {
+  color: #758279;
+}
+.trial-result-item .tri-value, .ac-value, .graph-card-title { color: #26372d; }
+.tri-mc, .omc-box .val { color: #496b52; }
+.tri-dd, .mdd-box .val { color: #527a5c; }
+.tri-rec { color: #9a6a2f; }
+.tri-rec-text { color: #526358; }
+.analytics-card::before { background: #78927b; }
+.analytics-card:hover, .graph-card:hover {
+  border-color: #b9cbb9;
+  box-shadow: 0 8px 22px rgba(35, 53, 40, 0.08);
+}
+.graph-card::before { display: none; }
+.graph-legend { border-top-color: #edf0e9; }
+.omc-box { background: #edf3ed; border-color: #d8e4d7; }
+.mdd-box { background: #edf5ed; border-color: #d4e5d3; }
+.calc-trial-btn {
+  background: #edf3ed;
+  border-color: #d8e4d7;
+  color: #496b52;
+}
+.calc-trial-btn:hover {
+  background: #e3ece2;
+  border-color: #b9cbb9;
+  color: #38563f;
+}
+.run-analysis-btn {
+  background: #496b52;
+  border-color: #496b52;
+  box-shadow: 0 3px 9px rgba(56, 86, 63, 0.16);
+}
+.run-analysis-btn:hover { background: #38563f; box-shadow: 0 5px 14px rgba(56, 86, 63, 0.2); }
+.trial-calc-status.done { background: #edf5ed; border-color: #d4e5d3; color: #456e4b; }
+.trial-calc-status.error { background: #fbefed; border-color: #eed5d1; color: #9e4c43; }
+.graph-canvas-wrap canvas { filter: none; }
+.reports-spinner { color: #526358; }
+
+/* Standard Proctor uses generated trial cards with its own legacy inline styles. */
+.app-layout .trial-card {
+  min-width: 0;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #dce4da;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(35, 53, 40, 0.04);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.app-layout .trial-card:hover {
+  border-color: #b9cbb9;
+  box-shadow: 0 5px 16px rgba(35, 53, 40, 0.07);
+}
+.app-layout .trial-card > .trial-header {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.app-layout .trial-card .trial-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.app-layout .trial-card .trial-fields > * { min-width: 0; }
+.app-layout .trial-card .trial-fields label {
+  display: block;
+  min-height: 30px;
+  color: #526358 !important;
+  line-height: 1.4;
+}
+.app-layout .trial-card .trial-input { width: 100%; min-width: 0; }
+#observation-section {
+  border-color: #dce4da !important;
+  border-radius: 12px !important;
+  box-shadow: 0 2px 10px rgba(35, 53, 40, 0.04);
+}
+#observation-section > div:first-child {
+  background: #f3f5f0 !important;
+  border-bottom-color: #dce4da !important;
+}
+#observation-section [style*="background:#3b82f6"],
+#observation-section [style*="background:#6366f1"],
+#observation-section [style*="background:#10b981"],
+#observation-section [style*="background:#059669"],
+#observation-section [style*="background:#f59e0b"],
+#observation-section [style*="background:#d97706"] {
+  background: #78927b !important;
+}
+#observation-section > div:nth-child(2) > div:first-child {
+  color: #526358 !important;
+}
+#results-section .data-table { min-width: 680px; }
+#obs-lab-thead th { background: #f3f5f0 !important; color: #526358 !important; }
+#obs-lab-tbody td { background: #fff !important; }
+#obs-lab-tbody tr:nth-child(even) td { background: #f8faf6 !important; }
+#obs-lab-tbody td:first-child { color: #526358 !important; }
+#obs-lab-tbody td:not(:first-child) { color: #38563f !important; }
+#proctor-conclusion-section {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+#proctor-conclusion-section > div:first-child {
+  background: #fff !important;
+  border: 1px solid #dce6dc !important;
+  box-shadow: 0 4px 14px rgba(35, 53, 40, 0.06);
+}
+#proctor-conclusion-section > div:first-child > div:first-child {
+  background: #55745a !important;
+}
+#proctor-conclusion-section > div:first-child > div:nth-child(2) {
+  background: none !important;
+}
+#proctor-conclusion-section #proctor-conclusion-text,
+#proctor-conclusion-section #proctor-conclusion-text strong,
+#proctor-conclusion-section > div:first-child > div:nth-child(3) > div:nth-child(2) > div:first-child {
+  color: #294735 !important;
+}
+#proctor-conclusion-section > div:first-child > div:nth-child(3) > div:nth-child(2) > div:last-child > div {
+  background: #edf3eb !important;
+  border-color: #dce6dc !important;
+}
+#proctor-conclusion-section > div:first-child > div:nth-child(3) > div:nth-child(2) > div:last-child > div > div:first-child {
+  background: #718b72 !important;
+}
+#proctor-conclusion-section #conc-mdd,
+#proctor-conclusion-section #conc-omc,
+#proctor-conclusion-section > div:first-child > div:nth-child(3) > div:nth-child(2) > div:last-child > div > span:first-of-type {
+  color: #294735 !important;
+}
+
+/* Soil Test trial inputs use their own markup instead of shared form classes. */
+#trials-container .trial-card {
+  min-width: 0;
+  padding: 18px;
+  background: #fff;
+  border: 1px solid #dce4da;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(35, 53, 40, 0.04);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+#trials-container .trial-card:hover {
+  border-color: #b9cbb9;
+  box-shadow: 0 5px 16px rgba(35, 53, 40, 0.07);
+}
+#trials-container .trial-header {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+#trials-container .trial-badge {
+  display: inline-flex;
+  align-items: baseline;
+  justify-self: start;
+  gap: 7px;
+  padding: 6px 11px;
+  background: #edf3ed;
+  border: 1px solid #d8e4d7;
+  border-radius: 8px;
+}
+#trials-container .trial-label {
+  color: #526358;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+#trials-container .trial-number {
+  color: #38563f;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+#trials-container .trial-live-result {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+#trials-container .live-mc,
+#trials-container .live-dd {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 9px;
+  background: #f5f7f2;
+  border: 1px solid #e4eae1;
+  border-radius: 7px;
+  color: #496b52;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+#trials-container .live-dd { color: #527a5c; }
+#trials-container .remove-trial-btn {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  padding: 0;
+  background: #fff;
+  border: 1px solid #dce4da;
+  border-radius: 8px;
+  color: #718075;
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+}
+#trials-container .remove-trial-btn:not(:disabled):hover {
+  color: #9e4c43;
+  background: #fbefed;
+  border-color: #eed5d1;
+}
+#trials-container .remove-trial-btn:disabled {
+  color: #aeb8af;
+  background: #f7f8f5;
+  cursor: not-allowed;
+}
+#trials-container .trial-fields {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 14px;
+}
+#trials-container .field-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+#trials-container .field-group label {
+  display: flex;
+  min-height: 34px;
+  align-items: flex-end;
+  color: #526358;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+#trials-container .trial-input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  padding: 9px 11px;
+  background: #fff;
+  border: 1px solid #d6dfd4;
+  border-radius: 8px;
+  color: #26372d;
+  font: inherit;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+#trials-container .trial-input::placeholder { color: #98a39a; }
+#trials-container .trial-input:focus {
+  outline: none;
+  border-color: #78927b;
+  box-shadow: 0 0 0 3px rgba(73, 107, 82, 0.12);
+}
+.add-trial-zone {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  background: #fbfcf9;
+  border: 1px dashed #b9cbb9;
+  border-radius: 10px;
+  color: #496b52;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.add-trial-zone:hover {
+  background: #f1f5ef;
+  border-color: #78927b;
+}
+.add-trial-zone:focus-visible {
+  outline: 3px solid rgba(73, 107, 82, 0.35);
+  outline-offset: 2px;
+}
+
+@media (max-width: 1000px) {
+  #trials-container .trial-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .graphs-grid { gap: 16px; }
+  .graph-card { padding: 16px; }
+  .graph-canvas-wrap { height: 240px; }
+  .trial-result-grid { gap: 8px; }
+}
+@media (max-width: 600px) {
+  #trials-container .trial-card { padding: 14px; }
+  #trials-container .trial-header {
+    grid-template-columns: minmax(80px, auto) minmax(0, 1fr) 34px;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  #trials-container .trial-live-result { gap: 5px; }
+  #trials-container .live-mc,
+  #trials-container .live-dd { padding: 4px 6px; font-size: 11px; }
+  #trials-container .remove-trial-btn { width: 34px; height: 34px; }
+  #trials-container .trial-fields { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  #trials-container .field-group label { min-height: 0; }
+  .app-layout .trial-card { padding: 14px; }
+  .app-layout .trial-card .trial-header { gap: 8px !important; }
+  .app-layout .trial-card .trial-fields { grid-template-columns: minmax(0, 1fr) !important; }
+  .app-layout .trial-card .trial-fields label { min-height: 0; }
+}

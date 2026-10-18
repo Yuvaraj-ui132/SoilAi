@@ -9,29 +9,38 @@
   <link rel="stylesheet" href="/css/dashboard.css">
   <style>
     .site-card {
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid rgba(59, 130, 246, 0.15);
+      background: #fff;
+      border: 1px solid #dce6dc;
       border-radius: 12px;
-      padding: 16px;
+      padding: 18px;
       cursor: pointer;
-      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 154px;
+      box-shadow: 0 2px 10px rgba(35, 53, 40, 0.04);
+      transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
       position: relative;
     }
     .site-card:hover {
-      background: rgba(15, 23, 42, 0.8);
-      border-color: rgba(59, 130, 246, 0.4);
+      background: #f8faf6;
+      border-color: #b9cbb9;
+    }
+    .site-card:focus-visible {
+      outline: 3px solid rgba(73, 107, 82, 0.3);
+      outline-offset: 2px;
     }
     .site-card.selected {
-      border-color: #3b82f6;
-      background: rgba(59, 130, 246, 0.08);
-      box-shadow: 0 0 15px rgba(59, 130, 246, 0.2);
+      border-color: #496b52;
+      background: #f7faf6;
+      box-shadow: 0 0 0 2px rgba(73, 107, 82, 0.12), 0 3px 12px rgba(35, 53, 40, 0.06);
     }
     .site-card.selected::after {
       content: '✓';
       position: absolute;
       top: 12px;
       right: 12px;
-      background: #3b82f6;
+      background: #496b52;
       color: white;
       border-radius: 50%;
       width: 20px;
@@ -42,14 +51,133 @@
       font-size: 12px;
       font-weight: bold;
     }
+    .site-card-name {
+      margin: 0 28px 12px 0;
+      color: #294735;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .site-card-meta {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin: 0 0 6px;
+      color: #526358;
+      font-size: 13px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .site-card-meta-icon {
+      flex: 0 0 16px;
+      text-align: center;
+    }
+    .site-card-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 12px;
+    }
+    .site-card-metric {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 9px;
+      border: 1px solid #dce6dc;
+      border-radius: 999px;
+      background: #edf3eb;
+      color: #294735;
+      font-size: 12px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
     .site-selector-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-      gap: 16px;
-      margin-bottom: 24px;
-      max-height: 220px;
-      overflow-y: auto;
-      padding-right: 8px;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .site-date-group { min-width: 0; }
+    .site-date-heading {
+      margin: 2px 0 10px;
+      color: #294735;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .site-date-cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .site-selector-empty {
+      grid-column: 1 / -1;
+      padding: 28px 20px;
+      border: 1px dashed #cbd8ca;
+      border-radius: 12px;
+      background: #fafbf8;
+      color: #526358;
+      text-align: center;
+    }
+    .site-selector-empty strong {
+      display: block;
+      margin-bottom: 5px;
+      color: #294735;
+      font-size: 15px;
+    }
+    .site-selector-empty a {
+      display: inline-block;
+      margin-top: 10px;
+      color: #496b52;
+      font-weight: 600;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .site-selection-controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .selection-hint {
+      margin: 0;
+      color: #526358;
+      font-size: 13px;
+      text-align: right;
+    }
+    .selection-hint[hidden] { display: none; }
+    .compare-run-btn {
+      background: #496b52;
+      border-color: #496b52;
+      color: #fff;
+      box-shadow: 0 3px 10px rgba(73, 107, 82, 0.16);
+    }
+    .compare-run-btn:hover:not(:disabled) {
+      background: #3c5c45;
+      border-color: #3c5c45;
+    }
+    .compare-run-btn:disabled {
+      background: #e8eee7;
+      border-color: #dce6dc;
+      color: #526358;
+      box-shadow: none;
+      opacity: 1;
+    }
+    @media (max-width: 1100px) {
+      .site-date-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 640px) {
+      .site-date-cards { grid-template-columns: minmax(0, 1fr); }
+    }
+    @media (max-width: 480px) {
+      .site-selection-header { align-items: flex-start !important; flex-direction: column; gap: 10px; }
+      .site-selection-controls { width: 100%; justify-content: flex-start; }
+      .site-selection-controls .compare-run-btn { flex: 1 1 100%; }
+      .selection-hint { text-align: left; }
+      .site-selection-header .section-divider { font-size: 14px; }
+      .site-selection-header #selection-counter { flex: 0 0 auto; }
+      .site-selection-card { padding: 18px !important; }
     }
     
     .rank-badge {
@@ -61,9 +189,9 @@
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
-    .rank-1 { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); }
-    .rank-2 { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
-    .rank-3 { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .rank-1 { background: #edf5ed; color: #456e4b; border: 1px solid #d4e5d3; }
+    .rank-2 { background: #fbf3e8; color: #8c6029; border: 1px solid #eedfc6; }
+    .rank-3 { background: #fbefed; color: #9e4c43; border: 1px solid #eed5d1; }
   </style>
 </head>
 <body>
@@ -122,11 +250,17 @@
         </div>
 
         <!-- Site Selection -->
-        <div class="glass fade-in" style="padding: 24px; margin-bottom: 24px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px;">
+        <div class="glass fade-in site-selection-card" style="padding: 24px; margin-bottom: 24px;">
+          <div class="site-selection-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
             <div class="section-divider" style="margin-bottom:0">📌 Select Sites to Compare (Max 3)</div>
-            <span class="badge badge-info" id="selection-counter">0 / 3 Selected</span>
+            <div class="site-selection-controls">
+              <span class="badge badge-info" id="selection-counter">0 of 3 selected</span>
+              <button id="run-compare-btn" class="btn compare-run-btn" aria-describedby="selection-hint" disabled>
+                ⚡ Compare Selected
+              </button>
+            </div>
           </div>
+          <p class="selection-hint" id="selection-hint">Select exactly 3 sites to compare.</p>
           
           <div id="site-selector" class="site-selector-grid">
             <div style="text-align:center;padding:40px;color:#475569;grid-column: 1 / -1;">
@@ -135,9 +269,6 @@
             </div>
           </div>
           
-          <button id="run-compare-btn" class="btn btn-primary" style="width:100%;justify-content:center" disabled>
-            ⚡ Run Comparative Analysis
-          </button>
         </div>
 
         <!-- Comparison Results (Hidden initially) -->

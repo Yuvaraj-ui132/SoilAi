@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SoilAI — Standard Proctor Compaction Test</title>
+  <meta name="soilai-api-base-url" content="https://soilai.onrender.com">
   <link rel="stylesheet" href="/css/main.css">
   <link rel="stylesheet" href="/css/dashboard.css">
 </head>
@@ -387,10 +388,12 @@
         <div id="recommendations-container" style="display:flex;flex-direction:column;gap:12px;margin-bottom:24px"></div>
 
         <!-- PDF Button -->
-        <div style="text-align:center;padding:20px 0">
-          <button onclick="generatePDF()"
-            style="background:linear-gradient(135deg,#d97706,#b45309);color:#fff;padding:14px 36px;border-radius:12px;font-size:15px;font-weight:700;border:none;cursor:pointer;font-family:'Inter',sans-serif;display:inline-flex;align-items:center;gap:10px;box-shadow:0 4px 20px rgba(217,119,6,0.35)">
-            📄 Download Full PDF Report
+        <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;padding:20px 0">
+          <button id="view-report-btn" onclick="viewReport()" class="btn btn-ghost" disabled>
+            View Report
+          </button>
+          <button id="download-report-btn" onclick="generatePDF()" class="btn btn-primary" disabled>
+            Download Report
           </button>
         </div>
       </div>
@@ -399,7 +402,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script type="module" src="/js/proctor.js"></script>
 </body>
 </html>

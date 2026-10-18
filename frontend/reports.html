@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SoilAI Cloud Lab — Reports</title>
   <meta name="description" content="View and download PDF reports for all your saved soil tests.">
+  <meta name="soilai-api-base-url" content="https://soilai.onrender.com">
   <link rel="stylesheet" href="/css/main.css">
   <link rel="stylesheet" href="/css/dashboard.css">
 </head>
@@ -83,16 +84,15 @@
     </div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script type="module">
     import { auth, db, COLLECTIONS } from '/js/firebase-config.js';
+    import { downloadReportPdf, isReportEligible, viewReportPdf } from '/js/report-actions.mjs';
     import {
       collection, query, where, orderBy, onSnapshot
     } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
     import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
 
     let allTests = [];
-    let currentUser = null;
 
     function escapeHTML(value) {
       return String(value).replace(/[&<>"']/g, character => ({
@@ -106,7 +106,6 @@
 
     onAuthStateChanged(auth, (user) => {
       if (!user) { window.location.href = '/'; return; }
-      currentUser = user;
       const nameEl = document.getElementById('user-display-name');
       const avEl   = document.getElementById('user-avatar');
       if (nameEl) nameEl.textContent = user.displayName || user.email;
@@ -161,8 +160,11 @@
       }
 
       container.innerHTML = tests.map((test, i) => {
-        const date = test.createdAt?.toDate ? test.createdAt.toDate() : new Date();
-        const dateStr = date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        const date = test.createdAt?.toDate ? test.createdAt.toDate() : null;
+        const dateStr = date instanceof Date && Number.isFinite(date.getTime())
+          ? date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+          : 'Date unavailable';
+        const eligible = isReportEligible(test);
 
         return `
           <div class="report-item fade-in" style="animation-delay:${i*0.04}s">
@@ -173,7 +175,7 @@
                   ${escapeHTML(test.testName || 'Untitled Test')}
                 </h4>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
-                  <span style="font-size:12px;color:#64748b">${dateStr}</span>
+                  <span style="font-size:12px;color:#64748b">${escapeHTML(dateStr)}</span>
                   ${test.location ? `<span style="font-size:12px;color:#475569">📍 ${escapeHTML(test.location)}</span>` : ''}
                   ${test.soilType ? `<span class="badge badge-neutral" style="font-size:10px">${escapeHTML(test.soilType)}</span>` : ''}
                 </div>
@@ -188,12 +190,18 @@
                 <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:0.06em">MDD</div>
                 <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#34d399">${test.results?.mdd?.toFixed(3) || '—'}</div>
               </div>
-              <button class="btn btn-amber btn-sm" data-report-id="${escapeHTML(test.id)}">📄 PDF</button>
+              <div class="report-actions" style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-ghost btn-sm" data-report-view="${escapeHTML(test.id)}" ${eligible ? '' : 'disabled title="Complete trial data is required to generate a report"'}>View Report</button>
+                <button class="btn btn-primary btn-sm" data-report-download="${escapeHTML(test.id)}" ${eligible ? '' : 'disabled title="Complete trial data is required to generate a report"'}>Download Report</button>
+              </div>
             </div>
           </div>`;
       }).join('');
-      container.querySelectorAll('[data-report-id]').forEach(button => {
-        button.addEventListener('click', () => window.downloadReport(button.dataset.reportId));
+      container.querySelectorAll('[data-report-view]').forEach(button => {
+        button.addEventListener('click', () => handleReportAction(button, viewReportPdf, 'viewed'));
+      });
+      container.querySelectorAll('[data-report-download]').forEach(button => {
+        button.addEventListener('click', () => handleReportAction(button, downloadReportPdf, 'downloaded'));
       });
     }
 
@@ -208,82 +216,24 @@
       renderList(filtered);
     };
 
-    window.downloadReport = (testId) => {
-      const test = allTests.find(t => t.id === testId);
-      if (!test) return;
-
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-      const margin = 20, pageW = 210;
-      let y = 20;
-
-      // Header
-      doc.setFillColor(15, 23, 42);
-      doc.rect(0, 0, pageW, 38, 'F');
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(255,255,255);
-      doc.text('SoilAI Cloud Lab — Proctor Test Report', margin, 15);
-      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(148,163,184);
-      const date = test.createdAt?.toDate ? test.createdAt.toDate() : new Date();
-      doc.text(`Date: ${date.toLocaleDateString('en-IN')}  |  Engineer: ${currentUser?.displayName || currentUser?.email}`, margin, 23);
-      doc.text(`Test: ${test.testName || '—'}  |  Location: ${test.location || '—'}  |  Soil: ${test.soilType || '—'}`, margin, 30);
-
-      y = 50;
-
-      // Results summary
-      doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(15,23,42);
-      doc.text('Key Results', margin, y); y += 2;
-      doc.setDrawColor(59,130,246); doc.setLineWidth(0.4); doc.line(margin, y, pageW-margin, y); y += 7;
-
-      const metrics = [
-        ['OMC', test.results?.omc?.toFixed(4)+'%', [59,130,246]],
-        ['MDD', test.results?.mdd?.toFixed(4)+' g/cm³', [16,185,129]],
-        ['Avg MC', test.results?.average_moisture_content?.toFixed(4)+'%', [168,85,247]],
-        ['Avg DD', test.results?.average_dry_density?.toFixed(4)+' g/cm³', [245,158,11]]
-      ];
-      metrics.forEach(([k,v,c], i) => {
-        const bx = margin + (i % 2) * 92, by = y + Math.floor(i/2)*22;
-        doc.setFillColor(...c.map(x=>Math.round(x*0.1+232)));
-        doc.roundedRect(bx, by, 82, 18, 2, 2, 'F');
-        doc.setFillColor(...c); doc.rect(bx, by, 2.5, 18, 'F');
-        doc.setFontSize(8); doc.setTextColor(100,116,139); doc.setFont('helvetica','normal');
-        doc.text(k, bx+5, by+6);
-        doc.setFontSize(10); doc.setTextColor(...c); doc.setFont('helvetica','bold');
-        doc.text(v, bx+5, by+13);
-      });
-      y += 52;
-
-      // Trial table
-      doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(15,23,42);
-      doc.text('Trial Data', margin, y); y += 2;
-      doc.line(margin, y, pageW-margin, y); y += 6;
-      const headers = ['#','W1','W2','W3','Wet Den.','MC(%)','DD(g/cc)'];
-      const colW    = [10, 24, 24, 24, 26, 22, 28];
-      doc.setFillColor(241,245,249); doc.rect(margin, y-4, pageW-2*margin, 8, 'F');
-      doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(71,85,105);
-      let cx = margin;
-      headers.forEach((h,i) => { doc.text(h, cx+1, y); cx+=colW[i]; });
-      y += 5;
-      doc.setFont('helvetica','normal');
-      (test.trials||[]).forEach((t,ri) => {
-        if(y>265){doc.addPage();y=20;}
-        cx = margin;
-        if(ri%2===0){doc.setFillColor(248,250,252);doc.rect(margin,y-4,pageW-2*margin,8,'F');}
-        doc.setTextColor(15,23,42);
-        [t.trial_number,t.W1,t.W2,t.W3,t.wet_density,t.moisture_content?.toFixed(4),t.dry_density?.toFixed(4)].forEach((v,i)=>{
-          doc.text(String(v??''),cx+1,y); cx+=colW[i];
-        });
-        y+=7;
-      });
-
-      // Footer
-      doc.setFillColor(15,23,42); doc.rect(0,290,pageW,10,'F');
-      doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(148,163,184);
-      doc.text('SoilAI Cloud Lab — Cloud Computing & Distributed Systems', margin, 296);
-
-      const safeName = String(test.testName || 'Report').replace(/[^a-zA-Z0-9_-]+/g, '_');
-      doc.save(`SoilAI_${safeName}_${Date.now()}.pdf`);
-      showToast('PDF downloaded!', 'success');
-    };
+    async function handleReportAction(button, action, result) {
+      const test = allTests.find(item => item.id === button.dataset.reportView
+        || item.id === button.dataset.reportDownload);
+      if (!test) {
+        showToast('The selected saved test could not be found.', 'warning');
+        return;
+      }
+      button.disabled = true;
+      try {
+        await action(test);
+        showToast(`PDF report ${result}.`, 'success');
+      } catch (error) {
+        console.error('PDF report action failed:', error);
+        showToast(error.message || 'Could not generate the PDF report.', 'warning');
+      } finally {
+        button.disabled = false;
+      }
+    }
 
     function showToast(msg, type='info') {
       const t = document.getElementById('toast');

@@ -2,7 +2,11 @@ import { renderCompactionChart } from './charts.js';
 
 let trialCount = 3;
 let lastResults = null;
-const configuredApiBase = document.querySelector('meta[name="soilai-api-base-url"]')?.content.trim() || '';
+const apiBaseOverride = new URLSearchParams(window.location.search).get('apiBase');
+const isLocalHost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const configuredApiBase = apiBaseOverride === 'local' && isLocalHost
+  ? ''
+  : document.querySelector('meta[name="soilai-api-base-url"]')?.content.trim() || '';
 
 async function apiRequest(path, options = {}) {
   const controller = new AbortController();
@@ -211,12 +215,17 @@ async function runCalculation() {
   button.disabled = true;
   button.textContent = 'Calculating locally…';
   try {
+    const testDate = new Date();
     const result = await apiRequest('/api/calculate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    lastResults = result;
+    lastResults = {
+      ...result,
+      location: document.getElementById('test-location').value.trim() || null,
+      test_date: testDate.toISOString(),
+    };
     displayResults(result);
     renderCompactionChart(
       'compaction-chart',
@@ -287,7 +296,11 @@ async function generatePDF() {
     const blob = await apiRequest('/api/export-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(lastResults),
+      body: JSON.stringify({
+        ...lastResults,
+        location: lastResults.location,
+        test_date: lastResults.test_date,
+      }),
     });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
