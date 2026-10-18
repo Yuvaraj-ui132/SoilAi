@@ -137,9 +137,10 @@ inference, backend PDF generation, and browser-local history. It does not need
 Firebase credentials for that workflow. Other pages still load Firebase and
 external frontend assets; they are not fully offline.
 
-Flask serves the `frontend/` directory as static files. The Soil Test page's
-`soilai-api-base-url` meta tag is empty by default, so requests are relative to
-the current origin for this local setup.
+Flask serves the `frontend/` directory as static files. In the Firebase-hosted
+frontend, the Soil Test page's `soilai-api-base-url` meta tag points to the
+Render API at `https://soilai.onrender.com`. For a local Flask-hosted workflow,
+the same-origin API URL can be used by leaving this value empty.
 
 ### Local Engineering API
 
@@ -195,24 +196,28 @@ screening information, not certified engineering advice.
 - The application still uses external Firebase and CDN assets on cloud-backed
   pages, so the whole site is not offline-capable.
 
-### Separate Firebase Hosting and Flask API
+### Firebase Hosting and Render API
 
 `firebase.json` currently serves the static `frontend/` directory and does not
-contain an API rewrite. No Cloud Run service name, region, or URL is configured
-in this repository. For a separate API deployment:
+contain an API rewrite. The API is deployed separately on Render. The frontend
+uses the API base URL configured in `frontend/soil-test.html`. Set the Render
+service environment variable `SOILAI_CORS_ORIGINS` to the exact Firebase
+Hosting origin:
 
-1. Set the `soilai-api-base-url` meta tag in `frontend/soil-test.html` to the
-   deployed Flask API origin (for example, `https://api.example.com`; supply
-   the actual URL for your deployment).
-2. Set `SOILAI_CORS_ORIGINS` on the Flask service to the exact Firebase Hosting
-   origin(s), such as `https://your-project.web.app`. Do not use `*`.
-3. Deploy the frontend and backend separately. A Hosting rewrite can be added
-   only after the actual Cloud Run service identifier and region are known.
+```text
+https://soilai-691b5.web.app
+```
+
+Do not use `*`. Redeploy/restart the Render service after changing its
+environment variable, then verify that API responses include
+`Access-Control-Allow-Origin: https://soilai-691b5.web.app` before deploying
+the frontend.
 
 The Flask development server must not be exposed publicly. Use the container
-configuration below for a production WSGI server.
+configuration below for a production WSGI server. Render uses the Dockerfile's
+Gunicorn command and supplies the `PORT` environment variable.
 
-### Docker / Cloud Run
+### Docker / Render
 
 Build from the repository root:
 
@@ -229,11 +234,10 @@ docker run --rm -p 8080:8080 soilai-backend
 Then verify `http://127.0.0.1:8080/api/health` (for example,
 `curl.exe http://127.0.0.1:8080/api/health` on Windows). The container uses
 Gunicorn, binds to the injected `PORT` (8080 by default), and runs as a
-non-root user. For a separate frontend origin, pass a comma-separated
-`SOILAI_CORS_ORIGINS` value that exactly lists the expected origins. Docker
-build/start has not been verified in this environment because the Docker
-daemon is unavailable; run these commands with Docker Desktop/the daemon
-running.
+non-root user. Configure `SOILAI_CORS_ORIGINS` on Render to the exact Firebase
+Hosting origin. Docker build/start has not been verified in this environment
+because the Docker daemon is unavailable; run these commands with Docker
+Desktop/the daemon running.
 
 Run backend tests and lint checks with:
 
