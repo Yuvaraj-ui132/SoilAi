@@ -1,17 +1,21 @@
 """Local-first Flask API for SoilAI calculations and engineering reports."""
 
 import io
+import logging
 import math
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
 from flask import Flask, jsonify, request, send_file, send_from_directory
 from flask_cors import CORS
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from werkzeug.exceptions import HTTPException
 
 from calculations import (
+    CalculationError,
     SoilTestRequest,
     calculate_soil_test,
     process_soil_test,
@@ -21,11 +25,38 @@ from ml_engine import (
     predict_compaction_parameters,
 )
 
+LOGGER = logging.getLogger(__name__)
 ROOT_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = ROOT_DIR / "frontend"
 app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
-CORS(app, resources={r"/api/*": {"origins": ["http://127.0.0.1:5000", "http://localhost:5000"]}})
+
+
+def _get_cors_origins() -> list[str]:
+    configured_origins = os.environ.get("SOILAI_CORS_ORIGINS")
+    if configured_origins is None:
+        return ["http://127.0.0.1:5000", "http://localhost:5000"]
+
+    origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
+    for origin in origins:
+        parsed = urlsplit(origin)
+        if (
+            origin == "*"
+            or parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise RuntimeError(
+                "SOILAI_CORS_ORIGINS must contain comma-separated HTTP(S) origins, not paths or wildcards"
+            )
+    return origins
+
+
+CORS(app, resources={r"/api/*": {"origins": _get_cors_origins()}})
 
 
 class MLPredictionRequest(BaseModel):
@@ -41,7 +72,7 @@ class MLPredictionRequest(BaseModel):
 
 
 class ModelConfidence(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     omc_r2: float
     omc_mae: float
     mdd_r2: float
@@ -49,16 +80,19 @@ class ModelConfidence(BaseModel):
 
 
 class MLPredictionResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     predicted_omc: float
     predicted_mdd: float
     plasticity_index: float
     uscs_classification: str
     verdict: dict[str, str]
     model_confidence: ModelConfidence
+    model_metrics_note: str
 
 
 class ReportTrial(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False)
+
     container_no: str = Field(min_length=1, max_length=40)
     W1: float
     W2: float
@@ -81,7 +115,7 @@ class ReportTrial(BaseModel):
 
 
 class ReportRequest(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", allow_inf_nan=False)
     test_name: str = Field(min_length=1, max_length=120)
     soil_type: str = Field(min_length=1, max_length=80)
     trials: list[ReportTrial] = Field(min_length=4, max_length=10)
@@ -112,6 +146,30 @@ def handle_validation_error(error):
             for item in error.errors()
         ],
     }), 422
+
+
+@app.errorhandler(CalculationError)
+def handle_calculation_error(error):
+    return jsonify({
+        "success": False,
+        "error": "Calculation could not be completed",
+        "details": [{"field": "trials", "message": str(error)}],
+    }), 422
+
+
+@app.errorhandler(HTTPException)
+def handle_http_error(error):
+    message = error.description if error.code and error.code < 500 else "Request failed"
+    return jsonify({"success": False, "error": message}), error.code or 500
+
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    LOGGER.exception("Unhandled SoilAI request error")
+    return jsonify({
+        "success": False,
+        "error": "An unexpected server error occurred",
+    }), 500
 
 
 @app.route("/")
@@ -280,12 +338,12 @@ def health():
 def system_info():
     return jsonify({
         "system": "SoilAI Cloud Lab",
-        "architecture": "Local-first Flask and browser application",
+        "architecture": "Flask calculation API with local soil screening and Firebase-backed cloud pages",
         "tiers": {
             "presentation": "HTML5/CSS3/Vanilla JS",
             "application": "Flask REST API",
             "numerical_engine": "NumPy polynomial fitting",
-            "estimator": "Local empirical plasticity-index correlation",
+            "estimator": "Local Random Forest trained on synthetic data; screening only",
         },
     })
 

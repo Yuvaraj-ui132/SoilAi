@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsUser(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function hasOnlyAllowedKeys(allowedKeys) {
+      return request.resource.data.keys().hasOnly(allowedKeys);
+    }
+
+    match /users/{userId} {
+      allow read: if ownsUser(userId);
+      allow create: if ownsUser(userId)
+        && hasOnlyAllowedKeys([
+          'uid', 'name', 'email', 'organization', 'role',
+          'createdAt', 'totalTests', 'lastLogin'
+        ])
+        && request.resource.data.keys().hasAll([
+          'uid', 'name', 'email', 'organization', 'role',
+          'createdAt', 'totalTests', 'lastLogin'
+        ])
+        && request.resource.data.uid == userId
+        && request.resource.data.name is string
+        && request.resource.data.email is string
+        && request.resource.data.organization is string
+        && request.resource.data.role == 'engineer'
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.lastLogin is timestamp
+        && request.resource.data.totalTests is number
+        && request.resource.data.totalTests == 0;
+      allow update: if ownsUser(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['name', 'organization', 'lastLogin', 'totalTests'])
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['name'])
+          || request.resource.data.name is string)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['organization'])
+          || request.resource.data.organization is string)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['lastLogin'])
+          || request.resource.data.lastLogin is timestamp)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['totalTests'])
+          || (request.resource.data.totalTests is number
+            && request.resource.data.totalTests >= 0));
+      allow delete: if false;
+    }
+
+    match /soilTests/{testId} {
+      allow read, delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if signedIn()
+        && hasOnlyAllowedKeys([
+          'uid', 'testName', 'location', 'soilType', 'trials', 'results', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'uid', 'testName', 'location', 'soilType', 'trials', 'results', 'createdAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.testName is string
+        && request.resource.data.location is string
+        && request.resource.data.soilType is string
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.trials is list
+        && request.resource.data.trials.size() >= 2
+        && request.resource.data.results is map
+        && request.resource.data.results.keys().hasOnly([
+          'omc', 'mdd', 'average_moisture_content', 'average_dry_density',
+          'status', 'trial_count'
+        ])
+        && request.resource.data.results.keys().hasAll([
+          'omc', 'mdd', 'average_moisture_content', 'average_dry_density',
+          'status', 'trial_count'
+        ])
+        && request.resource.data.results.omc is number
+        && request.resource.data.results.mdd is number
+        && request.resource.data.results.average_moisture_content is number
+        && request.resource.data.results.average_dry_density is number
+        && request.resource.data.results.status == 'calculated'
+        && request.resource.data.results.trial_count == request.resource.data.trials.size();
+      allow update: if false;
+    }
+
+    match /activityLog/{activityId} {
+      allow read, delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create, update: if false;
+    }
+
+    match /moistureTests/{testId} {
+      allow read, delete: if signedIn() && resource.data.uid == request.auth.uid;
+      allow create: if signedIn()
+        && hasOnlyAllowedKeys([
+          'uid', 'W1', 'W2', 'W3', 'label', 'result',
+          'waterWt', 'drySoilWt', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'uid', 'W1', 'W2', 'W3', 'label', 'result',
+          'waterWt', 'drySoilWt', 'createdAt'
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.W1 is number
+        && request.resource.data.W2 is number
+        && request.resource.data.W3 is number
+        && request.resource.data.W1 > 0
+        && request.resource.data.W2 > request.resource.data.W3
+        && request.resource.data.W3 > request.resource.data.W1
+        && request.resource.data.label is string
+        && request.resource.data.result is number
+        && request.resource.data.waterWt is number
+        && request.resource.data.drySoilWt is number
+        && request.resource.data.createdAt is timestamp;
+      allow update: if false;
+    }
+  }
+}

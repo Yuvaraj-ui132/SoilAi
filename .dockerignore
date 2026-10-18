@@ -1,0 +1,8 @@
+.git
+.pytest_cache
+__pycache__
+*.py[cod]
+*.joblib
+.venv
+venv
+node_modules

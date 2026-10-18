@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SoilAI Cloud Lab — Soil Test</title>
   <meta name="description" content="Run a new soil compaction test — enter trial data and calculate OMC and MDD automatically.">
+  <meta name="soilai-api-base-url" content="">
   <link rel="stylesheet" href="/css/main.css">
   <link rel="stylesheet" href="/css/dashboard.css">
 </head>
@@ -107,7 +108,7 @@
         <section class="glass" aria-labelledby="ml-estimator-heading" style="padding:24px;margin-bottom:22px">
           <div class="section-divider" id="ml-estimator-heading" style="margin-bottom:16px">🤖 ML Parameter Estimator &amp; Soil Verdict</div>
           <p class="page-desc" style="margin-bottom:18px">
-            Offline Random Forest screening from Atterberg limits. Predictions support triage only and do not replace laboratory testing.
+            Local Random Forest screening from Atterberg limits. Training data is synthetic; predictions support triage only and do not replace laboratory testing.
           </p>
           <div class="grid-2" style="gap:16px;max-width:700px">
             <div class="form-group">
@@ -146,7 +147,7 @@
             <p style="margin:8px 0;color:#94a3b8">Moisture sensitivity: <strong id="ml-moisture-sensitivity">—</strong></p>
             <p style="margin:8px 0;color:#94a3b8">Recommended field roller: <strong id="ml-roller-recommendation">—</strong></p>
             <details style="margin-top:14px;color:#64748b">
-              <summary>Model holdout benchmarks</summary>
+              <summary>Synthetic-data holdout benchmarks (not real-world accuracy)</summary>
               <p id="ml-model-confidence" style="margin-top:8px"></p>
             </details>
           </div>

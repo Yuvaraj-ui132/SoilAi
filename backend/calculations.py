@@ -1,16 +1,18 @@
 """Validated geotechnical calculations and local engineering estimators."""
 
 import math
+import sys
+import warnings
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from pydantic_core import PydanticCustomError
-from scipy.stats import pearsonr
 
 
 class TrialInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     container_no: str = Field(min_length=1, max_length=40)
     W1: float = Field(gt=0, description="Empty container tare mass in grams")
@@ -47,12 +49,12 @@ class TrialInput(BaseModel):
 
 
 class SoilTestRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
     test_name: str = Field(min_length=1, max_length=120)
     soil_type: str = Field(min_length=1, max_length=80)
     trials: list[TrialInput] = Field(min_length=4, max_length=10)
-    specific_gravity: Optional[float] = Field(default=2.65, ge=2.4, le=3.0)
+    specific_gravity: float = Field(default=2.65, ge=2.4, le=3.0)
     liquid_limit: Optional[float] = Field(default=None, gt=0, le=200)
     plastic_limit: Optional[float] = Field(default=None, ge=0, le=200)
 
@@ -85,9 +87,20 @@ def calculate_moisture_content(W1: float, W2: float, W3: float) -> float:
         raise ValueError("Masses must be finite numbers")
     if not W2 > W3 > W1:
         raise ValueError("Masses must satisfy W2 > W3 > W1")
-    moisture = (W2 - W3) / (W3 - W1) * 100.0
-    if not math.isfinite(moisture):
-        raise ValueError("Calculated moisture content is outside the supported numeric range")
+    try:
+        moisture = float(
+            (Decimal(str(W2)) - Decimal(str(W3)))
+            / (Decimal(str(W3)) - Decimal(str(W1)))
+            * Decimal("100")
+        )
+    except (InvalidOperation, OverflowError, ZeroDivisionError) as exc:
+        raise CalculationError(
+            "Mass values are outside the supported calculation range"
+        ) from exc
+    if not math.isfinite(moisture) or moisture <= 0:
+        raise CalculationError(
+            "Calculated moisture content is outside the supported numeric range"
+        )
     return moisture
 
 
@@ -119,34 +132,49 @@ def calculate_soil_test(test_request: SoilTestRequest) -> dict:
 
     moisture_values = np.asarray([trial["moisture_content"] for trial in trial_results], dtype=float)
     density_values = np.asarray([trial["dry_density"] for trial in trial_results], dtype=float)
+    if np.unique(moisture_values).size < 3:
+        raise CalculationError(
+            "At least three distinct moisture contents are required to fit a compaction curve"
+        )
+    max_moisture = float(np.max(np.abs(moisture_values)))
+    if max_moisture > math.sqrt(sys.float_info.max):
+        raise CalculationError(
+            "Calculated moisture contents exceed the supported curve-fitting range"
+        )
+
+    center = float(np.min(moisture_values) / 2.0 + np.max(moisture_values) / 2.0)
+    scale = float(np.max(np.abs(moisture_values - center)))
+    if not math.isfinite(scale) or scale == 0:
+        raise CalculationError("Moisture contents do not support a stable curve fit")
+    scaled_moisture = (moisture_values - center) / scale
     try:
-        coefficients = np.polyfit(moisture_values, density_values, 2)
-    except (ValueError, np.linalg.LinAlgError, FloatingPointError):
-        coefficients = np.asarray([0.0, 0.0, float(np.mean(density_values))])
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", np.RankWarning)
+            coefficients = np.polyfit(scaled_moisture, density_values, 2)
+    except (ValueError, np.linalg.LinAlgError, FloatingPointError, np.RankWarning) as exc:
+        raise CalculationError("The compaction curve could not be fitted") from exc
     if not np.all(np.isfinite(coefficients)):
-        coefficients = np.asarray([0.0, 0.0, float(np.mean(density_values))])
-    a, b, c = (float(value) for value in coefficients)
-    predicted = np.polyval(coefficients, moisture_values)
+        raise CalculationError("The compaction curve fit produced non-finite values")
+    scaled_a, scaled_b, scaled_c = (float(value) for value in coefficients)
+    predicted = np.polyval(coefficients, scaled_moisture)
     residual_sum = float(np.sum((density_values - predicted) ** 2))
     total_sum = float(np.sum((density_values - np.mean(density_values)) ** 2))
     if total_sum == 0:
         r_squared = 1.0 if residual_sum == 0 else 0.0
-    elif np.std(predicted) == 0 or np.std(density_values) == 0:
-        r_squared = 1.0 - residual_sum / total_sum
     else:
-        r_squared = float(pearsonr(density_values, predicted).statistic ** 2)
+        r_squared = 1.0 - residual_sum / total_sum
     if not math.isfinite(r_squared):
-        r_squared = 0.0
+        raise CalculationError("The compaction curve fit produced an invalid R-squared value")
 
     min_moisture = float(np.min(moisture_values))
     max_moisture = float(np.max(moisture_values))
-    if a < 0:
-        vertex = -b / (2.0 * a)
+    if scaled_a < 0 and abs(scaled_b) <= -2.0 * scaled_a:
+        scaled_vertex = -scaled_b / (2.0 * scaled_a)
     else:
-        vertex = math.nan
-    if a < 0 and min_moisture <= vertex <= max_moisture:
-        omc = vertex
-        mdd = float(np.polyval(coefficients, vertex))
+        scaled_vertex = math.nan
+    if scaled_a < 0 and -1.0 <= scaled_vertex <= 1.0:
+        omc = center + scale * scaled_vertex
+        mdd = float(np.polyval(coefficients, scaled_vertex))
         peak_method = "quadratic_fit"
     else:
         peak_index = int(np.argmax(density_values))
@@ -154,15 +182,23 @@ def calculate_soil_test(test_request: SoilTestRequest) -> dict:
         mdd = float(density_values[peak_index])
         peak_method = "measured_peak_fallback"
 
-    specific_gravity = test_request.specific_gravity or 2.65
+    try:
+        inverse_scale = 1.0 / scale
+        scaled_center = center * inverse_scale
+        a = scaled_a * inverse_scale * inverse_scale
+        b = (scaled_b - 2.0 * scaled_a * scaled_center) * inverse_scale
+        c = scaled_a * scaled_center * scaled_center - scaled_b * scaled_center + scaled_c
+    except OverflowError as exc:
+        raise CalculationError("The compaction curve exceeds the supported numeric range") from exc
+    if not all(math.isfinite(value) for value in (a, b, c, omc, mdd)):
+        raise CalculationError("The compaction curve exceeds the supported numeric range")
+
+    specific_gravity = test_request.specific_gravity
     zav_moistures = np.linspace(min_moisture - 2.0, max_moisture + 4.0, 60)
     zav_curve = [
         {
             "moisture": float(water_content),
-            "dry_density": float(
-                (specific_gravity * 1.0) /
-                (1.0 + (water_content * specific_gravity / 100.0))
-            ),
+            "dry_density": _zero_air_void_density(water_content, specific_gravity),
         }
         for water_content in zav_moistures
     ]
@@ -181,6 +217,22 @@ def calculate_soil_test(test_request: SoilTestRequest) -> dict:
         "average_moisture_content": float(np.mean(moisture_values)),
         "average_dry_density": float(np.mean(density_values)),
     }
+
+
+class CalculationError(ValueError):
+    """Expected numerical calculation failure caused by request data."""
+
+
+def _zero_air_void_density(moisture: float, specific_gravity: float) -> float:
+    if moisture > 100.0 / specific_gravity:
+        density = (100.0 / moisture) / (
+            1.0 + (100.0 / specific_gravity) / moisture
+        )
+    else:
+        density = specific_gravity / (1.0 + moisture * specific_gravity / 100.0)
+    if not math.isfinite(density) or density <= 0:
+        raise CalculationError("The zero-air-void curve exceeds the supported numeric range")
+    return density
 
 
 def evaluate_compaction(omc: float, mdd: float, soil_type: str) -> dict:

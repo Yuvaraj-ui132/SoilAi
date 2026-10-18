@@ -2,6 +2,45 @@ import { renderCompactionChart } from './charts.js';
 
 let trialCount = 3;
 let lastResults = null;
+const configuredApiBase = document.querySelector('meta[name="soilai-api-base-url"]')?.content.trim() || '';
+
+async function apiRequest(path, options = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(`${configuredApiBase.replace(/\/+$/, '')}${path}`, {
+      ...options,
+      signal: controller.signal,
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (response.ok && contentType.includes('application/pdf')) {
+      return await response.blob();
+    }
+
+    const responseText = await response.text();
+    let payload;
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      throw new Error(`The API returned an unexpected response (HTTP ${response.status}).`);
+    }
+    if (!response.ok) {
+      const detail = payload.details?.map(item => `${item.field}: ${item.message}`).join('; ');
+      throw new Error(detail || payload.error || `The API request failed (HTTP ${response.status}).`);
+    }
+    return payload;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('The API request timed out. Please try again.');
+    }
+    if (error instanceof TypeError) {
+      throw new Error('Could not reach the SoilAI API. Check the API URL and your connection.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 const PRESETS = {
   "sandy-silt": {
@@ -172,16 +211,11 @@ async function runCalculation() {
   button.disabled = true;
   button.textContent = 'Calculating locally…';
   try {
-    const response = await fetch('/api/calculate', {
+    const result = await apiRequest('/api/calculate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const result = await response.json();
-    if (!response.ok) {
-      const detail = result.details?.map(item => `${item.field}: ${item.message}`).join('; ');
-      throw new Error(detail || result.error || 'Calculation request failed.');
-    }
     lastResults = result;
     displayResults(result);
     renderCompactionChart(
@@ -250,16 +284,11 @@ async function generatePDF() {
     return;
   }
   try {
-    const response = await fetch('/api/export-pdf', {
+    const blob = await apiRequest('/api/export-pdf', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(lastResults),
     });
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'PDF export failed.');
-    }
-    const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -285,16 +314,11 @@ async function runMLScreening() {
       liquid_limit: Number.parseFloat(document.getElementById('ml-liquid-limit').value),
       plastic_limit: Number.parseFloat(document.getElementById('ml-plastic-limit').value),
     };
-    const response = await fetch('/api/predict', {
+    const result = await apiRequest('/api/predict', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const result = await response.json();
-    if (!response.ok) {
-      const detail = result.details?.map(item => `${item.field}: ${item.message}`).join('; ');
-      throw new Error(detail || result.error || 'ML screening request failed.');
-    }
 
     document.getElementById('ml-predicted-omc').textContent = `${result.predicted_omc.toFixed(2)}%`;
     document.getElementById('ml-predicted-mdd').textContent = `${result.predicted_mdd.toFixed(3)} g/cm³`;
@@ -321,7 +345,7 @@ async function runMLScreening() {
     }
     const confidence = result.model_confidence;
     document.getElementById('ml-model-confidence').textContent =
-      `OMC R² ${confidence.omc_r2.toFixed(3)}, MAE ${confidence.omc_mae.toFixed(2)}%; ` +
+      `${result.model_metrics_note} OMC R² ${confidence.omc_r2.toFixed(3)}, MAE ${confidence.omc_mae.toFixed(2)}%; ` +
       `MDD R² ${confidence.mdd_r2.toFixed(3)}, MAE ${confidence.mdd_mae.toFixed(3)} g/cm³.`;
     resultPanel.style.display = 'block';
   } catch (error) {

@@ -196,21 +196,45 @@ function subscribeHistory(uid) {
       return timeB - timeA;
     });
     docs = docs.slice(0, 5);
-    
-    list.innerHTML = docs.map(data => {
-      const date = data.createdAt?.toDate ? data.createdAt.toDate().toLocaleDateString('en-IN') : '—';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(59,130,246,0.06);font-size:13px">
-        <div>
-          <div style="font-weight:600;color:#e2e8f0">${data.label || 'Untitled Sample'}</div>
-          <div style="font-size:11px;color:#475569">${date} · W1=${data.W1} W2=${data.W2} W3=${data.W3}</div>
-        </div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:800;color:#60a5fa">${data.result?.toFixed(2)}%</div>
-      </div>`;
-    }).join('');
+
+    const formatNumber = (value, digits = 2) => (
+      typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—'
+    );
+    const entries = docs.map(data => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(59,130,246,0.06);font-size:13px';
+
+      const details = document.createElement('div');
+      const label = document.createElement('div');
+      label.style.cssText = 'font-weight:600;color:#e2e8f0';
+      label.textContent = typeof data.label === 'string' && data.label ? data.label : 'Untitled Sample';
+
+      let date = '—';
+      if (data.createdAt?.toDate) {
+        const createdAt = data.createdAt.toDate();
+        if (createdAt instanceof Date && Number.isFinite(createdAt.getTime())) {
+          date = createdAt.toLocaleDateString('en-IN');
+        }
+      }
+      const measurements = document.createElement('div');
+      measurements.style.cssText = 'font-size:11px;color:#475569';
+      measurements.textContent =
+        `${date} · W1=${formatNumber(data.W1)} W2=${formatNumber(data.W2)} W3=${formatNumber(data.W3)}`;
+
+      const result = document.createElement('div');
+      result.style.cssText = 'font-family:"JetBrains Mono",monospace;font-size:18px;font-weight:800;color:#60a5fa';
+      result.textContent = `${formatNumber(data.result)}%`;
+      details.append(label, measurements);
+      row.append(details, result);
+      return row;
+    });
+    list.replaceChildren(...entries);
   }, (err) => {
     console.error('MC history error:', err);
-    document.getElementById('mc-history-list').innerHTML =
-      '<div style="text-align:center;padding:16px;color:#f87171;font-size:13px">Could not load history. Check Firestore rules.</div>';
+    const errorMessage = document.createElement('div');
+    errorMessage.style.cssText = 'text-align:center;padding:16px;color:#f87171;font-size:13px';
+    errorMessage.textContent = 'Could not load history. Check Firestore rules.';
+    document.getElementById('mc-history-list').replaceChildren(errorMessage);
   });
 }
 

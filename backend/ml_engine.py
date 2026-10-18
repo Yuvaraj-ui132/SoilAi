@@ -4,18 +4,27 @@ from __future__ import annotations
 
 import logging
 import os
+import pickle
 import tempfile
+import warnings
 from pathlib import Path
 from typing import TypedDict
 
 import joblib
 import numpy as np
+import sklearn
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.exceptions import InconsistentVersionWarning
 from sklearn.metrics import mean_absolute_error, r2_score
 from sklearn.model_selection import train_test_split
 
 LOGGER = logging.getLogger(__name__)
-MODEL_PATH = Path(__file__).resolve().parent / "models" / "soil_rf.joblib"
+MODEL_PATH = Path(
+    os.environ.get(
+        "SOILAI_MODEL_PATH",
+        str(Path(__file__).resolve().parent / "models" / "soil_rf.joblib"),
+    )
+)
 FEATURE_NAMES = ("liquid_limit", "plastic_limit", "plasticity_index")
 
 
@@ -26,6 +35,7 @@ class RegressionMetrics(TypedDict):
 
 class SoilModelBundle(TypedDict):
     bundle_version: int
+    sklearn_version: str
     model: RandomForestRegressor
     metrics: dict[str, RegressionMetrics]
     feature_names: tuple[str, ...]
@@ -86,11 +96,47 @@ def _train_bundle() -> SoilModelBundle:
         }
 
     return {
-        "bundle_version": 1,
+        "bundle_version": 2,
+        "sklearn_version": sklearn.__version__,
         "model": model,
         "metrics": metrics,
         "feature_names": FEATURE_NAMES,
     }
+
+
+def _is_compatible_bundle(bundle: object) -> bool:
+    if not isinstance(bundle, dict):
+        return False
+    model = bundle.get("model")
+    metrics = bundle.get("metrics")
+    if (
+        bundle.get("bundle_version") != 2
+        or bundle.get("sklearn_version") != sklearn.__version__
+        or bundle.get("feature_names") != FEATURE_NAMES
+        or not isinstance(model, RandomForestRegressor)
+        or getattr(model, "n_features_in_", None) != len(FEATURE_NAMES)
+        or getattr(model, "n_outputs_", None) != 2
+        or not isinstance(metrics, dict)
+        or not {"omc", "mdd"}.issubset(metrics)
+    ):
+        return False
+    try:
+        probe = np.asarray(model.predict(np.zeros((1, len(FEATURE_NAMES)))), dtype=float)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if probe.shape != (1, 2) or not np.all(np.isfinite(probe)):
+        return False
+    for target_name in ("omc", "mdd"):
+        target_metrics = metrics[target_name]
+        if not isinstance(target_metrics, dict) or not {"r2", "mae"}.issubset(target_metrics):
+            return False
+        if not all(
+            isinstance(target_metrics[key], (int, float))
+            and np.isfinite(target_metrics[key])
+            for key in ("r2", "mae")
+        ):
+            return False
+    return True
 
 
 def train_or_load_model(
@@ -99,16 +145,25 @@ def train_or_load_model(
     """Load the persisted bundle or train, measure, and atomically persist one."""
     path = Path(model_path)
     if path.exists() and not force_train:
-        bundle = joblib.load(path)
-        if not (
-            not isinstance(bundle, dict)
-            or bundle.get("bundle_version") != 1
-            or bundle.get("feature_names") != FEATURE_NAMES
-            or not isinstance(bundle.get("model"), RandomForestRegressor)
-            or not {"omc", "mdd"}.issubset(bundle.get("metrics", {}))
-        ):
-            return bundle
-        LOGGER.warning("SoilAI model cache is stale or invalid; retraining it: %s", path)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", InconsistentVersionWarning)
+                bundle = joblib.load(path)
+        except (
+            AttributeError,
+            EOFError,
+            ImportError,
+            KeyError,
+            OSError,
+            pickle.UnpicklingError,
+            TypeError,
+            ValueError,
+        ) as error:
+            LOGGER.warning("SoilAI model cache could not be loaded; retraining it: %s (%s)", path, error)
+        else:
+            if _is_compatible_bundle(bundle):
+                return bundle
+            LOGGER.warning("SoilAI model cache is stale or invalid; retraining it: %s", path)
 
     bundle = _train_bundle()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -196,7 +251,7 @@ def predict_compaction_parameters(
     if not np.isfinite(ll) or not np.isfinite(pl) or ll <= pl:
         raise ValueError("Inputs must be finite and liquid limit must exceed plastic limit")
     pi = ll - pl
-    bundle = model_bundle or MODEL_BUNDLE
+    bundle = MODEL_BUNDLE if model_bundle is None else model_bundle
     features = np.asarray([[ll, pl, pi]], dtype=np.float64)
     predictions = bundle["model"].predict(features)[0]
     predicted_omc = float(np.clip(predictions[0], 6.0, 35.0))
@@ -218,6 +273,10 @@ def predict_compaction_parameters(
             "mdd_r2": bundle["metrics"]["mdd"]["r2"],
             "mdd_mae": bundle["metrics"]["mdd"]["mae"],
         },
+        "model_metrics_note": (
+            "Metrics are from a synthetic holdout split; they are not calibrated "
+            "confidence or real-world laboratory accuracy."
+        ),
     }
 
 

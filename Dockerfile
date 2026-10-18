@@ -1,22 +1,26 @@
-# SoilAI Cloud Lab — Dockerfile
-# Used for deploying the Flask backend to Google Cloud Run
-
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Copy backend files
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements.txt ./requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir -r requirements.txt
 
-COPY backend/ ./backend/
+COPY backend/app.py backend/calculations.py backend/ml_engine.py ./backend/
 COPY frontend/ ./frontend/
 
-# Set working directory to backend so relative paths work
 WORKDIR /app/backend
 
-# Expose port (Cloud Run uses 8080)
-ENV PORT=8080
+ENV PORT=8080 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    SOILAI_MODEL_PATH=/tmp/soilai/soil_rf.joblib
 
-CMD exec gunicorn --bind :$PORT --workers 2 --threads 4 --timeout 60 app:app
+RUN adduser --disabled-password --gecos "" --uid 10001 appuser \
+    && mkdir -p /tmp/soilai \
+    && chown -R appuser:appuser /tmp/soilai
+
+USER appuser
+EXPOSE 8080
+
+CMD ["sh", "-c", "exec gunicorn --preload --bind 0.0.0.0:${PORT:-8080} --workers 2 --threads 4 --timeout 60 app:app"]
