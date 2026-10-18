@@ -94,6 +94,16 @@
     let allTests = [];
     let currentUser = null;
 
+    function escapeHTML(value) {
+      return String(value).replace(/[&<>"']/g, character => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[character]);
+    }
+
     onAuthStateChanged(auth, (user) => {
       if (!user) { window.location.href = '/'; return; }
       currentUser = user;
@@ -160,12 +170,12 @@
               <div style="background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:10px;padding:12px;font-size:22px;flex-shrink:0">📊</div>
               <div style="min-width:0">
                 <h4 style="font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                  ${test.testName || 'Untitled Test'}
+                  ${escapeHTML(test.testName || 'Untitled Test')}
                 </h4>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
                   <span style="font-size:12px;color:#64748b">${dateStr}</span>
-                  ${test.location ? `<span style="font-size:12px;color:#475569">📍 ${test.location}</span>` : ''}
-                  ${test.soilType ? `<span class="badge badge-neutral" style="font-size:10px">${test.soilType}</span>` : ''}
+                  ${test.location ? `<span style="font-size:12px;color:#475569">📍 ${escapeHTML(test.location)}</span>` : ''}
+                  ${test.soilType ? `<span class="badge badge-neutral" style="font-size:10px">${escapeHTML(test.soilType)}</span>` : ''}
                 </div>
               </div>
             </div>
@@ -178,10 +188,13 @@
                 <div style="font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:0.06em">MDD</div>
                 <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#34d399">${test.results?.mdd?.toFixed(3) || '—'}</div>
               </div>
-              <button class="btn btn-amber btn-sm" onclick="downloadReport('${test.id}')">📄 PDF</button>
+              <button class="btn btn-amber btn-sm" data-report-id="${escapeHTML(test.id)}">📄 PDF</button>
             </div>
           </div>`;
       }).join('');
+      container.querySelectorAll('[data-report-id]').forEach(button => {
+        button.addEventListener('click', () => window.downloadReport(button.dataset.reportId));
+      });
     }
 
     window.filterTests = () => {
@@ -267,7 +280,8 @@
       doc.setFont('helvetica','normal'); doc.setFontSize(7); doc.setTextColor(148,163,184);
       doc.text('SoilAI Cloud Lab — Cloud Computing & Distributed Systems', margin, 296);
 
-      doc.save(`SoilAI_${test.testName||'Report'}_${Date.now()}.pdf`);
+      const safeName = String(test.testName || 'Report').replace(/[^a-zA-Z0-9_-]+/g, '_');
+      doc.save(`SoilAI_${safeName}_${Date.now()}.pdf`);
       showToast('PDF downloaded!', 'success');
     };
 

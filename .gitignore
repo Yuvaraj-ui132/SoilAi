@@ -1,6 +1,7 @@
 # Python
 __pycache__/
 *.py[cod]
+backend/models/*.joblib
 *.pyo
 *.pyd
 *.pyc

@@ -42,6 +42,22 @@ OMC  = Moisture Content at Maximum Dry Density
 MDD  = Maximum value of Dry Density across all trials
 ```
 
+## Proctor Trial Input Validation
+
+The local Proctor calculation API validates trial data with Pydantic v2 before
+running geotechnical calculations:
+
+- Each trial includes a container number, tare mass (`W1`), wet mass (`W2`),
+  dry mass (`W3`), and wet density.
+- All numeric trial values must be finite. Masses must satisfy
+  `W2 > W3 > W1`, and `W1` must be greater than zero.
+- Wet density must be between `0.8` and `3.0 g/cm³`, inclusive.
+- A soil test must contain between 4 and 10 trials. Specific gravity defaults
+  to `2.65` and must be between `2.4` and `3.0`, inclusive.
+- Legacy Python callers can use `validate_trial_input(trial_data)`, which
+  validates the input through the same `TrialInput` Pydantic model and returns
+  an empty list when valid or validation messages when invalid.
+
 ---
 
 ## Project Structure
@@ -79,24 +95,42 @@ SoilAI/
 ### 1. Install Python Dependencies
 
 ```bash
-cd backend
-pip install -r requirements.txt
+python -m pip install -r backend/requirements.txt
 ```
 
 ### 2. Run the Flask Server
 
 ```bash
-cd backend
-python app.py
+python backend/app.py
 ```
 
-The server starts at **http://localhost:5000**
+The server starts at **http://127.0.0.1:5000** by default. Set `SOILAI_HOST`,
+`SOILAI_PORT` (or `PORT`) and `SOILAI_DEBUG=true` only when you explicitly need
+to override the safe local defaults.
 
 ### 3. Open the App
 
-Visit **http://localhost:5000** in your browser.
+Visit **http://127.0.0.1:5000/soil-test** for the local recruiter demo.
+The Soil Test page uses the local Flask API, local PDF generation, and
+browser-local history; it does not require Firebase credentials or external
+AI services. The login, cloud dashboard, reports, and sync features elsewhere
+in the app still use the existing Firebase configuration.
 
 Flask serves the entire `frontend/` directory as static files.
+
+### Local Engineering API
+
+- `POST /api/calculate` — validate and calculate 4–10 compaction trials,
+  quadratic fit, ZAV curve, and deterministic equipment/suitability rules.
+- `POST /api/predict` — return a local empirical OMC/MDD screening estimate
+  from liquid and plastic limits; this is not a laboratory result.
+- `POST /api/export-pdf` — generate an ASTM D698 / IS 2720-stamped PDF locally.
+
+Run the backend regression suite with:
+
+```bash
+python -m pytest backend/tests
+```
 
 ---
 
@@ -118,12 +152,25 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
     match /soilTests/{docId} {
-      allow read, write: if request.auth != null && request.auth.uid == resource.data.uid;
-      allow create: if request.auth != null;
+      allow read, delete: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.uid;
+      allow update: if request.auth != null
+        && request.auth.uid == resource.data.uid
+        && request.auth.uid == request.resource.data.uid;
     }
     match /activityLog/{docId} {
-      allow read, write: if request.auth != null && request.auth.uid == resource.data.uid;
-      allow create: if request.auth != null;
+      allow read, delete: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.uid;
+      allow update: if request.auth != null
+        && request.auth.uid == resource.data.uid
+        && request.auth.uid == request.resource.data.uid;
+    }
+    match /moistureTests/{docId} {
+      allow read, delete: if request.auth != null && request.auth.uid == resource.data.uid;
+      allow create: if request.auth != null && request.auth.uid == request.resource.data.uid;
+      allow update: if request.auth != null
+        && request.auth.uid == resource.data.uid
+        && request.auth.uid == request.resource.data.uid;
     }
   }
 }

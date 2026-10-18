@@ -39,7 +39,7 @@
         </div>
       </nav>
       <div class="sidebar-footer">
-        <button class="btn btn-ghost" style="width:100%;justify-content:center" id="logout-btn">🚪 Sign Out</button>
+        <span class="badge badge-info" style="width:100%;justify-content:center">Local Demo Mode</span>
       </div>
     </aside>
 
@@ -65,7 +65,7 @@
         <div class="page-header fade-in" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:14px">
           <div>
             <h1 class="page-title">Soil Compaction Test</h1>
-            <p class="page-desc">Enter trial data → Calculate OMC & MDD → Save to Firestore cloud</p>
+            <p class="page-desc">Run a local Standard Proctor analysis with a standards-based evaluation and PDF report.</p>
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <button class="btn btn-ghost btn-sm" onclick="loadSampleData()">📋 Load Sample Data</button>
@@ -95,11 +95,62 @@
                 <option>Clayey Silt</option>
                 <option>Well-graded Gravel</option>
                 <option>Poorly-graded Sand</option>
+                <option>Sandy Silt (SM)</option>
+                <option>Clayey Gravel (GC)</option>
+                <option>Cohesive Lean Clay (CL)</option>
                 <option>Other</option>
               </select>
             </div>
           </div>
         </div>
+
+        <section class="glass" aria-labelledby="ml-estimator-heading" style="padding:24px;margin-bottom:22px">
+          <div class="section-divider" id="ml-estimator-heading" style="margin-bottom:16px">🤖 ML Parameter Estimator &amp; Soil Verdict</div>
+          <p class="page-desc" style="margin-bottom:18px">
+            Offline Random Forest screening from Atterberg limits. Predictions support triage only and do not replace laboratory testing.
+          </p>
+          <div class="grid-2" style="gap:16px;max-width:700px">
+            <div class="form-group">
+              <label class="form-label" for="ml-liquid-limit">Liquid Limit (%)</label>
+              <input id="ml-liquid-limit" class="form-input" type="number" min="15" max="100" step="0.1" value="62">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="ml-plastic-limit">Plastic Limit (%)</label>
+              <input id="ml-plastic-limit" class="form-input" type="number" min="10" max="60" step="0.1" value="26">
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0">
+            <button type="button" class="btn btn-ghost btn-sm" data-ml-preset="expansive">Expansive Clay (LL: 62, PL: 26)</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-ml-preset="silt">Lean Silt (LL: 32, PL: 22)</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-ml-preset="loam">Sandy Loam (LL: 22, PL: 15)</button>
+            <button type="button" class="btn btn-primary" id="run-ml-screening">Run ML Screening</button>
+          </div>
+          <p id="ml-screening-error" role="alert" style="display:none;color:#f87171"></p>
+          <div id="ml-screening-results" aria-live="polite" style="display:none;margin-top:18px">
+            <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+              <div class="result-metric glass">
+                <div class="result-metric-label">Predicted OMC</div>
+                <div class="result-metric-value omc" id="ml-predicted-omc">—</div>
+              </div>
+              <div class="result-metric glass">
+                <div class="result-metric-label">Predicted MDD</div>
+                <div class="result-metric-value mdd" id="ml-predicted-mdd">—</div>
+              </div>
+              <div class="result-metric glass">
+                <div class="result-metric-label">Plasticity Index</div>
+                <div class="result-metric-value" id="ml-plasticity-index">—</div>
+              </div>
+            </div>
+            <p style="margin:8px 0;color:#94a3b8">USCS group: <strong id="ml-uscs-classification">—</strong></p>
+            <p style="margin:8px 0;color:#94a3b8">Engineering verdict: <span id="ml-verdict-badge" class="badge">—</span></p>
+            <p style="margin:8px 0;color:#94a3b8">Moisture sensitivity: <strong id="ml-moisture-sensitivity">—</strong></p>
+            <p style="margin:8px 0;color:#94a3b8">Recommended field roller: <strong id="ml-roller-recommendation">—</strong></p>
+            <details style="margin-top:14px;color:#64748b">
+              <summary>Model holdout benchmarks</summary>
+              <p id="ml-model-confidence" style="margin-top:8px"></p>
+            </details>
+          </div>
+        </section>
 
         <!-- ── Formula Reference ── -->
         <div class="glass" style="padding:16px 22px;margin-bottom:22px;display:flex;gap:28px;flex-wrap:wrap;align-items:center">
@@ -113,6 +164,16 @@
           <div style="font-size:12px;color:#94a3b8;margin-left:auto">
             OMC = MC @ max DD &nbsp;|&nbsp; MDD = max(Dry Density)
           </div>
+        </div>
+
+        <div class="form-group" style="max-width:520px;margin:24px 0 18px">
+          <label class="form-label" for="preset-selector">Recruiter Demo Preset</label>
+          <select id="preset-selector" class="form-input">
+            <option value="">Select Demo Preset...</option>
+            <option value="sandy-silt">Standard Proctor - Sandy Silt (SM)</option>
+            <option value="clayey-gravel">Modified Proctor - Clayey Gravel (GC)</option>
+            <option value="lean-clay">Cohesive Lean Clay (CL)</option>
+          </select>
         </div>
 
         <!-- ── Trial Cards ── -->
@@ -233,7 +294,7 @@
         </div>
 
         <!-- ═══ RESULTS SECTION ═══ -->
-        <div id="results-section" style="margin-top:32px">
+        <div id="results-section" style="margin-top:32px;display:none">
           <div class="section-divider" style="margin-bottom:20px">📊 Calculation Results</div>
 
           <!-- Key Metrics -->
@@ -299,6 +360,12 @@
           <!-- Recommendations -->
           <div class="section-divider" style="margin-bottom:16px">💡 Engineering Recommendations</div>
           <div id="recommendations-container" style="display:flex;flex-direction:column;gap:12px;margin-bottom:22px"></div>
+          <div class="glass" style="padding:18px;margin-bottom:22px">
+            <h3 style="margin:0 0 12px;color:#e2e8f0">Standards Evaluation</h3>
+            <p style="margin:6px 0;color:#94a3b8">Subgrade suitability: <strong id="evaluation-suitability">—</strong></p>
+            <p style="margin:6px 0;color:#94a3b8">Moisture control window: <strong id="evaluation-window">—</strong></p>
+            <p style="margin:6px 0;color:#94a3b8">Recommended equipment: <strong id="evaluation-equipment">—</strong></p>
+          </div>
 
           <!-- PDF Button -->
           <div style="text-align:center;padding:24px 0">
@@ -314,9 +381,6 @@
     </div>
   </div>
 
-  <!-- Chart.js & jsPDF CDNs -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script type="module" src="/js/soil-test.js"></script>
 </body>
 </html>

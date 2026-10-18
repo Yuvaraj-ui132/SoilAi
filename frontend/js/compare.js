@@ -12,6 +12,16 @@ const CHART_COLORS = [
   { border: '#f59e0b', bg: 'rgba(245, 158, 11, 0.1)' }  // Amber
 ];
 
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[character]);
+}
+
 // ── Auth Guard & Fetching ──────────────────────────────────────────────
 onAuthStateChanged(auth, (user) => {
   if (!user) { window.location.href = '/'; return; }
@@ -55,9 +65,9 @@ function renderSiteSelector() {
   container.innerHTML = allTests.map(test => {
     const dateStr = test.createdAt?.toDate ? test.createdAt.toDate().toLocaleDateString() : 'Unknown Date';
     return `
-      <div class="site-card" data-id="${test.id}" onclick="toggleSiteSelection('${test.id}')">
-        <div style="font-weight:700;color:#e2e8f0;margin-bottom:6px">${test.testName || 'Untitled'}</div>
-        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">📍 ${test.location || 'Unknown Location'}</div>
+      <div class="site-card" data-id="${escapeHTML(test.id)}">
+        <div style="font-weight:700;color:#e2e8f0;margin-bottom:6px">${escapeHTML(test.testName || 'Untitled')}</div>
+        <div style="font-size:11px;color:#94a3b8;margin-bottom:4px">📍 ${escapeHTML(test.location || 'Unknown Location')}</div>
         <div style="font-size:11px;color:#94a3b8">📅 ${dateStr}</div>
         <div style="margin-top:10px;display:flex;gap:10px;">
           <span style="font-size:11px;background:rgba(59,130,246,0.15);color:#60a5fa;padding:2px 6px;border-radius:4px;">MDD: ${test.results.mdd.toFixed(2)}</span>
@@ -66,11 +76,16 @@ function renderSiteSelector() {
       </div>
     `;
   }).join('');
+  container.querySelectorAll('.site-card').forEach(card => {
+    card.addEventListener('click', () => window.toggleSiteSelection(card.dataset.id));
+  });
 }
 
 window.toggleSiteSelection = (id) => {
   const index = selectedTests.indexOf(id);
-  const card = document.querySelector(`.site-card[data-id="${id}"]`);
+  const card = Array.from(document.querySelectorAll('.site-card'))
+    .find(siteCard => siteCard.dataset.id === id);
+  if (!card) return;
   
   if (index === -1) {
     if (selectedTests.length >= 3) {
@@ -125,7 +140,7 @@ function renderRankingTable(ranked) {
     return `
       <tr>
         <td><span class="rank-badge rank-${index+1}">Rank ${index+1}</span></td>
-        <td style="font-weight:600;color:#e2e8f0">${test.testName || 'Untitled'}</td>
+        <td style="font-weight:600;color:#e2e8f0">${escapeHTML(test.testName || 'Untitled')}</td>
         <td style="font-family:'JetBrains Mono';color:#34d399;font-weight:700">${mdd.toFixed(3)}</td>
         <td style="font-family:'JetBrains Mono';color:#60a5fa;font-weight:700">${omc.toFixed(2)}</td>
         <td>${type}</td>
@@ -141,12 +156,12 @@ function generateRecommendation(ranked) {
   
   const recEl = document.getElementById('auto-recommendation');
   
-  let paragraph = `<p style="margin-bottom:10px;">Based on the comparative Standard Proctor Test analysis, <strong>${best.testName || 'the highest ranked site'}</strong> achieved the highest Maximum Dry Density (${best.results.mdd.toFixed(3)} g/cc) with an Optimum Moisture Content of ${best.results.omc.toFixed(1)}%.</p>`;
+  let paragraph = `<p style="margin-bottom:10px;">Based on the comparative Standard Proctor Test analysis, <strong>${escapeHTML(best.testName || 'the highest ranked site')}</strong> achieved the highest Maximum Dry Density (${best.results.mdd.toFixed(3)} g/cc) with an Optimum Moisture Content of ${best.results.omc.toFixed(1)}%.</p>`;
   
   paragraph += `<p style="margin-bottom:10px;">This indicates superior load-bearing capacity and compaction characteristics, making it the most suitable material among the selected options for structural fill or road construction applications.</p>`;
   
   if (ranked.length > 1) {
-    paragraph += `<p>Conversely, <strong>${worst.testName || 'the lowest ranked site'}</strong> showed the lowest density (${worst.results.mdd.toFixed(3)} g/cc), suggesting higher plasticity or poorer gradation, and may require chemical stabilization prior to use.</p>`;
+    paragraph += `<p>Conversely, <strong>${escapeHTML(worst.testName || 'the lowest ranked site')}</strong> showed the lowest density (${worst.results.mdd.toFixed(3)} g/cc), suggesting higher plasticity or poorer gradation, and may require chemical stabilization prior to use.</p>`;
   }
   
   recEl.innerHTML = paragraph;

@@ -3,45 +3,46 @@
  * Moisture Content vs Dry Density compaction curves
  */
 
-let compactionChartInstance = null;
+const compactionChartInstances = new Map();
 
 /**
  * Render the Moisture Content vs Dry Density compaction chart.
- * @param {number}   omc     - Optimum Moisture Content
- * @param {number}   mdd     - Maximum Dry Density
- * @param {object}   fit     - Optional quadratic regression coefficients {a, b, c}
- * @param {boolean}  mini    - Compact mode for dashboard widget
+ * @param {Array}  trials  - Experimental moisture-content/dry-density measurements
+ * @param {object} fitData - Polynomial coefficients and optional peak {a, b, c, omc, mdd}
+ * @param {Array}  zavData - Zero-air-void line points
+ * @param {boolean} mini   - Compact mode for dashboard widget
  */
-function renderCompactionChart(canvasId, trials, omc, mdd, fit = null, mini = false) {
+function renderCompactionChart(canvasId, trials, fitData, zavData = [], mini = false) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
 
-  // Destroy previous instance to avoid canvas reuse error
-  if (compactionChartInstance && canvasId === 'compaction-chart') {
-    compactionChartInstance.destroy();
-    compactionChartInstance = null;
-  }
+  const existingChart = compactionChartInstances.get(canvasId);
+  if (existingChart) existingChart.destroy();
 
   const ctx = canvas.getContext('2d');
-
-  // Prepare data points
-  const scatterData = trials.map(t => ({ x: t.moisture_content, y: t.dry_density }));
-  
-  // Generate curve points
+  const measurements = trials.map(trial => ({
+    moisture_content: trial.moisture_content ?? trial.mc,
+    dry_density: trial.dry_density ?? trial.dd
+  }));
+  const scatterData = measurements.map(trial => ({
+    x: trial.moisture_content,
+    y: trial.dry_density
+  }));
   const curveData = [];
-  if (fit) {
-    const minX = Math.max(0, Math.min(...trials.map(t => t.moisture_content)) - 2);
-    const maxX = Math.max(...trials.map(t => t.moisture_content)) + 2;
-    const step = (maxX - minX) / 50;
+  if (fitData && [fitData.a, fitData.b, fitData.c].every(Number.isFinite) && measurements.length) {
+    const minX = Math.max(0, Math.min(...measurements.map(trial => trial.moisture_content)) - 2);
+    const maxX = Math.max(...measurements.map(trial => trial.moisture_content)) + 2;
+    const step = Math.max((maxX - minX) / 100, 0.05);
     for (let x = minX; x <= maxX; x += step) {
-      const y = (fit.a * x * x) + (fit.b * x) + fit.c;
+      const y = (fitData.a * x * x) + (fitData.b * x) + fitData.c;
       if (y > 0) curveData.push({ x, y });
     }
-  } else {
-    trials.forEach(t => curveData.push({ x: t.moisture_content, y: t.dry_density }));
+  }
+  const zavPoints = zavData.map(point => ({ x: point.moisture, y: point.dry_density }));
+  if (typeof Chart === 'undefined') {
+    return drawLocalCompactionChart(canvas, scatterData, curveData, zavPoints, fitData, mini);
   }
 
-  // Gradient fill under the curve
   const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
   gradient.addColorStop(0,   'rgba(59, 130, 246, 0.35)');
   gradient.addColorStop(0.5, 'rgba(59, 130, 246, 0.12)');
@@ -51,6 +52,16 @@ function renderCompactionChart(canvasId, trials, omc, mdd, fit = null, mini = fa
     type: 'scatter',
     data: {
       datasets: [
+        {
+          label: 'Zero Air Void (ZAV)',
+          data: zavPoints,
+          borderColor: 'rgba(248, 113, 113, 0.85)',
+          borderDash: [7, 5],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+          order: 3,
+        },
         {
           label: 'Compaction Curve',
           data: curveData,
@@ -71,15 +82,15 @@ function renderCompactionChart(canvasId, trials, omc, mdd, fit = null, mini = fa
           pointRadius: mini ? 3 : 6,
           order: 1
         },
-        {
+        ...(Number.isFinite(fitData?.omc) && Number.isFinite(fitData?.mdd) ? [{
           label: 'OMC/MDD Peak',
-          data: [{ x: omc, y: mdd }],
+          data: [{ x: fitData.omc, y: fitData.mdd }],
           backgroundColor: '#fbbf24',
           borderColor: '#f59e0b',
           pointRadius: mini ? 5 : 10,
           pointStyle: 'star',
-          order: 0
-        }
+          order: 0,
+        }] : [])
       ]
     },
     options: {
@@ -104,13 +115,11 @@ function renderCompactionChart(canvasId, trials, omc, mdd, fit = null, mini = fa
           callbacks: {
             label : (item)  => ` ${item.dataset.label}: (${item.parsed.x.toFixed(2)}%, ${item.parsed.y.toFixed(4)})`,
             afterBody: (item) => {
-              if (item[0].datasetIndex === 2) return [`\n★ Peak Detected`];
+              if (item[0].dataset.label === 'OMC/MDD Peak') return [`\n★ Peak Detected`];
               return [];
             }
           }
         },
-        // Peak annotation label
-        annotation: undefined
       },
       scales: {
         x: {
@@ -144,62 +153,78 @@ function renderCompactionChart(canvasId, trials, omc, mdd, fit = null, mini = fa
     }
   });
 
-  if (canvasId === 'compaction-chart') {
-    compactionChartInstance = chart;
-  }
-
-  // Draw OMC/MDD annotation on the canvas after render
-  chart.options.animation.onComplete = () => drawOmcAnnotation(ctx, chart, omc, mdd, mini);
-  chart.update();
-
+  compactionChartInstances.set(canvasId, chart);
   return chart;
 }
 
-/**
- * Draw a custom annotation arrow + label on the canvas pointing at the peak.
- */
-function drawOmcAnnotation(ctx, chart, omc, mdd, mini) {
-  if (mini || !omc || !mdd) return;
+function drawLocalCompactionChart(canvas, trials, curve, zav, fitData, mini) {
+  const ctx = canvas.getContext('2d');
+  const width = canvas.width;
+  const height = canvas.height;
+  const points = [...trials, ...curve, ...zav].filter(point =>
+    Number.isFinite(point.x) && Number.isFinite(point.y)
+  );
+  if (points.length === 0) return null;
 
-  const xAxis = chart.scales.x;
-  const yAxis = chart.scales.y;
-  const x = xAxis.getPixelForValue(omc);
-  const y = yAxis.getPixelForValue(mdd);
+  const padding = { left: 52, right: 20, top: 20, bottom: mini ? 34 : 48 };
+  const minX = Math.min(...points.map(point => point.x));
+  const maxX = Math.max(...points.map(point => point.x));
+  const minY = Math.min(...points.map(point => point.y));
+  const maxY = Math.max(...points.map(point => point.y));
+  const xSpan = Math.max(maxX - minX, 1);
+  const ySpan = Math.max(maxY - minY, 0.1);
+  const x = value => padding.left + ((value - minX) / xSpan) * (width - padding.left - padding.right);
+  const y = value => height - padding.bottom - ((value - minY) / ySpan) * (height - padding.top - padding.bottom);
 
-  if (x < chart.chartArea.left || x > chart.chartArea.right || y < chart.chartArea.top || y > chart.chartArea.bottom) return;
-
+  ctx.clearRect(0, 0, width, height);
+  ctx.font = '11px sans-serif';
+  ctx.strokeStyle = 'rgba(148, 163, 184, 0.55)';
+  ctx.fillStyle = '#94a3b8';
+  ctx.beginPath();
+  ctx.moveTo(padding.left, padding.top);
+  ctx.lineTo(padding.left, height - padding.bottom);
+  ctx.lineTo(width - padding.right, height - padding.bottom);
+  ctx.stroke();
+  ctx.fillText('Moisture Content (%)', padding.left, height - 10);
   ctx.save();
-
-  // Vertical dashed line from point to top
-  ctx.setLineDash([4, 4]);
-  ctx.strokeStyle = 'rgba(251, 191, 36, 0.5)';
-  ctx.lineWidth   = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(x, y - 14);
-  ctx.lineTo(x, chart.chartArea.top + 10);
-  ctx.stroke();
-  ctx.setLineDash([]);
-
-  // Label box
-  const label   = `OMC ${omc.toFixed(2)}%  |  MDD ${mdd.toFixed(4)}`;
-  ctx.font      = 'bold 11px Inter, sans-serif';
-  const tw      = ctx.measureText(label).width;
-  const bx      = Math.min(x - tw / 2 - 8, chart.chartArea.right - tw - 20);
-  const by      = chart.chartArea.top + 12;
-
-  ctx.fillStyle    = 'rgba(251, 191, 36, 0.15)';
-  ctx.strokeStyle  = '#fbbf24';
-  ctx.lineWidth    = 1;
-  ctx.beginPath();
-  ctx.roundRect(bx, by, tw + 16, 22, 4);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.fillStyle    = '#fbbf24';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(label, bx + 8, by + 11);
-
+  ctx.translate(14, height / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('Dry Density (g/cm³)', 0, 0);
   ctx.restore();
+
+  const drawLine = (linePoints, color, dashed, lineWidth) => {
+    if (!linePoints.length) return;
+    ctx.beginPath();
+    linePoints.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(x(point.x), y(point.y));
+      else ctx.lineTo(x(point.x), y(point.y));
+    });
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.setLineDash(dashed ? [7, 5] : []);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
+  drawLine(zav, 'rgba(248, 113, 113, 0.9)', true, 1.5);
+  drawLine(curve, '#3b82f6', false, 2.5);
+
+  trials.forEach(point => {
+    ctx.beginPath();
+    ctx.arc(x(point.x), y(point.y), 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#60a5fa';
+    ctx.fill();
+  });
+  if (Number.isFinite(fitData?.omc) && Number.isFinite(fitData?.mdd)) {
+    ctx.beginPath();
+    ctx.arc(x(fitData.omc), y(fitData.mdd), 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fill();
+  }
+  if (!mini) {
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('Trials   — Fitted curve   - - ZAV', padding.left, padding.top + 12);
+  }
+  return null;
 }
 
 /**

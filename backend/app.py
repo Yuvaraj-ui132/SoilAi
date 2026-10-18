@@ -1,296 +1,320 @@
-"""
-SoilAI Cloud Lab - Flask Backend
-Provides REST API for soil test calculations and Firestore data management.
-Demonstrates Cloud Computing and Distributed Computing Systems concepts.
-"""
+"""Local-first Flask API for SoilAI calculations and engineering reports."""
 
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
+import io
+import math
 import os
-import json
-from datetime import datetime
-from calculations import process_soil_test, validate_trial_input, get_compaction_recommendations
+from datetime import datetime, timezone
+from pathlib import Path
+from xml.sax.saxutils import escape
 
-app = Flask(__name__, static_folder='../frontend', static_url_path='')
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+from flask import Flask, jsonify, request, send_file, send_from_directory
+from flask_cors import CORS
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Static page routes
-# ──────────────────────────────────────────────────────────────────────────────
+from calculations import (
+    SoilTestRequest,
+    calculate_soil_test,
+    process_soil_test,
+)
+from ml_engine import (
+    MODEL_BUNDLE,
+    predict_compaction_parameters,
+)
 
-@app.route('/')
-def index():
-    return send_from_directory('../frontend', 'index.html')
-
-@app.route('/signup')
-def signup():
-    return send_from_directory('../frontend', 'signup.html')
-
-@app.route('/forgot-password')
-def forgot_password():
-    return send_from_directory('../frontend', 'forgot-password.html')
-
-@app.route('/dashboard')
-def dashboard():
-    return send_from_directory('../frontend', 'dashboard.html')
-
-@app.route('/moisture')
-def moisture():
-    return send_from_directory('../frontend', 'moisture.html')
-
-@app.route('/proctor')
-def proctor():
-    return send_from_directory('../frontend', 'proctor.html')
-
-@app.route('/reports')
-def reports():
-    return send_from_directory('../frontend', 'reports.html')
-
-@app.route('/compare')
-def compare():
-    return send_from_directory('../frontend', 'compare.html')
+ROOT_DIR = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = ROOT_DIR / "frontend"
+app = Flask(__name__, static_folder=str(FRONTEND_DIR), static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
+CORS(app, resources={r"/api/*": {"origins": ["http://127.0.0.1:5000", "http://localhost:5000"]}})
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# API: Soil Test Calculation Engine
-# ──────────────────────────────────────────────────────────────────────────────
+class MLPredictionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    liquid_limit: float = Field(ge=15.0, le=100.0, description="Liquid Limit (%)")
+    plastic_limit: float = Field(ge=10.0, le=60.0, description="Plastic Limit (%)")
 
-@app.route('/api/calculate', methods=['POST'])
-def calculate():
-    """
-    Main calculation endpoint.
-    Accepts trial data and returns calculated moisture content, dry density,
-    OMC, MDD, and compaction recommendations.
-
-    Distributed Computing: This endpoint processes data that is stored in
-    Firebase Firestore, enabling real-time sync across distributed clients.
-    """
-    try:
-        data = request.get_json()
-
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-
-        trials = data.get('trials', [])
-
-        if not trials:
-            return jsonify({'error': 'No trial data provided'}), 400
-
-        if len(trials) < 2:
-            return jsonify({'error': 'At least 2 trials are required to calculate OMC and MDD'}), 400
-
-        # Validate all trials first
-        all_errors = []
-        for i, trial in enumerate(trials):
-            errors = validate_trial_input(trial)
-            if errors:
-                for err in errors:
-                    all_errors.append(f"Trial {i + 1}: {err}")
-
-        if all_errors:
-            return jsonify({'error': 'Validation failed', 'details': all_errors}), 422
-
-        # Process the soil test
-        results = process_soil_test(trials)
-
-        # Add metadata
-        results['calculated_at'] = datetime.utcnow().isoformat() + 'Z'
-        results['test_name'] = data.get('test_name', f"Soil Test {datetime.utcnow().strftime('%Y-%m-%d')}")
-        results['location'] = data.get('location', 'Not specified')
-        results['soil_type'] = data.get('soil_type', 'Not specified')
-
-        return jsonify({
-            'success': True,
-            'data': results
-        })
-
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 422
-    except Exception as e:
-        return jsonify({'error': f'Calculation error: {str(e)}'}), 500
+    @model_validator(mode="after")
+    def validate_limit_order(self):
+        if self.liquid_limit <= self.plastic_limit:
+            raise ValueError("liquid_limit must be greater than plastic_limit")
+        return self
 
 
-@app.route('/api/calculate/single-trial', methods=['POST'])
-def calculate_single_trial():
-    """
-    Calculate moisture content and dry density for a single trial.
-    Used for real-time preview as user types.
-    """
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
-
-        errors = validate_trial_input(data)
-        if errors:
-            return jsonify({'error': 'Validation failed', 'details': errors}), 422
-
-        W1 = float(data['W1'])
-        W2 = float(data['W2'])
-        W3 = float(data['W3'])
-        wet_density = float(data['wet_density'])
-
-        from calculations import calculate_moisture_content, calculate_dry_density
-        moisture = calculate_moisture_content(W1, W2, W3)
-        dry_density = calculate_dry_density(wet_density, moisture)
-
-        return jsonify({
-            'success': True,
-            'moisture_content': moisture,
-            'dry_density': dry_density,
-            'water_content_g': round(W2 - W3, 4),
-            'dry_soil_g': round(W3 - W1, 4)
-        })
-
-    except ValueError as e:
-        return jsonify({'error': str(e)}), 422
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+class ModelConfidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    omc_r2: float
+    omc_mae: float
+    mdd_r2: float
+    mdd_mae: float
 
 
-@app.route('/api/recommendations', methods=['POST'])
-def recommendations():
-    """
-    Get compaction recommendations for given moisture content and dry density
-    relative to OMC and MDD.
-    """
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No data provided'}), 400
+class MLPredictionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    predicted_omc: float
+    predicted_mdd: float
+    plasticity_index: float
+    uscs_classification: str
+    verdict: dict[str, str]
+    model_confidence: ModelConfidence
 
-        required = ['moisture_content', 'omc', 'dry_density', 'mdd']
-        missing = [f for f in required if f not in data]
-        if missing:
-            return jsonify({'error': f'Missing fields: {", ".join(missing)}'}), 400
 
-        recs, status = get_compaction_recommendations(
-            float(data['moisture_content']),
-            float(data['omc']),
-            float(data['dry_density']),
-            float(data['mdd'])
+class ReportTrial(BaseModel):
+    container_no: str = Field(min_length=1, max_length=40)
+    W1: float
+    W2: float
+    W3: float
+    wet_density: float = Field(ge=0.8, le=3.0)
+    moisture_content: float
+    dry_density: float
+
+    @model_validator(mode="after")
+    def validate_finite_values(self):
+        values = (
+            self.W1, self.W2, self.W3, self.wet_density,
+            self.moisture_content, self.dry_density,
         )
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("Report values must be finite numbers")
+        if not self.W2 > self.W3 > self.W1:
+            raise ValueError("Report masses must satisfy W2 > W3 > W1")
+        return self
 
+
+class ReportRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    test_name: str = Field(min_length=1, max_length=120)
+    soil_type: str = Field(min_length=1, max_length=80)
+    trials: list[ReportTrial] = Field(min_length=4, max_length=10)
+    omc: float
+    mdd: float
+    evaluation: dict
+
+    @model_validator(mode="after")
+    def validate_summary_values(self):
+        if not all(math.isfinite(value) for value in (self.omc, self.mdd)):
+            raise ValueError("Report summary values must be finite numbers")
+        if self.mdd <= 0:
+            raise ValueError("MDD must be positive")
+        return self
+
+
+@app.errorhandler(ValidationError)
+def handle_validation_error(error):
+    return jsonify({
+        "success": False,
+        "error": "Validation failed",
+        "details": [
+            {
+                "field": ".".join(str(part) for part in item["loc"]) or error.title,
+                "message": item["msg"],
+                "type": item["type"],
+            }
+            for item in error.errors()
+        ],
+    }), 422
+
+
+@app.route("/")
+def index():
+    return send_from_directory(FRONTEND_DIR, "index.html")
+
+
+@app.route("/signup")
+def signup():
+    return send_from_directory(FRONTEND_DIR, "signup.html")
+
+
+@app.route("/forgot-password")
+def forgot_password():
+    return send_from_directory(FRONTEND_DIR, "forgot-password.html")
+
+
+@app.route("/dashboard")
+def dashboard():
+    return send_from_directory(FRONTEND_DIR, "dashboard.html")
+
+
+@app.route("/soil-test")
+def soil_test():
+    return send_from_directory(FRONTEND_DIR, "soil-test.html")
+
+
+@app.route("/moisture")
+def moisture():
+    return send_from_directory(FRONTEND_DIR, "moisture.html")
+
+
+@app.route("/proctor")
+def proctor():
+    return send_from_directory(FRONTEND_DIR, "proctor.html")
+
+
+@app.route("/reports")
+def reports():
+    return send_from_directory(FRONTEND_DIR, "reports.html")
+
+
+@app.route("/compare")
+def compare():
+    return send_from_directory(FRONTEND_DIR, "compare.html")
+
+
+@app.post("/api/calculate")
+def calculate():
+    body = request.get_json(silent=True)
+    if body is None:
+        return jsonify({"success": False, "error": "A JSON request body is required"}), 400
+    validated = SoilTestRequest.model_validate(body)
+    return jsonify({"success": True, **calculate_soil_test(validated)})
+
+
+@app.post("/api/predict")
+def predict():
+    body = request.get_json(silent=True)
+    if body is None:
+        return jsonify({"success": False, "error": "A JSON request body is required"}), 400
+    values = MLPredictionRequest.model_validate(body)
+    result = predict_compaction_parameters(
+        values.liquid_limit, values.plastic_limit, MODEL_BUNDLE
+    )
+    response = MLPredictionResponse.model_validate(result)
+    return jsonify({"success": True, **response.model_dump()})
+
+
+@app.post("/api/export-pdf")
+def export_pdf():
+    body = request.get_json(silent=True)
+    if body is None:
+        return jsonify({"success": False, "error": "A JSON request body is required"}), 400
+    report = ReportRequest.model_validate(body)
+
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import mm
+        from reportlab.platypus import (
+            SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+        )
+    except ImportError:
         return jsonify({
-            'success': True,
-            'recommendations': recs,
-            'status': status
-        })
+            "success": False,
+            "error": "PDF export is unavailable because ReportLab is not installed",
+        }), 503
 
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# API: Health & System Info (Cloud Computing Demonstration)
-# ──────────────────────────────────────────────────────────────────────────────
-
-@app.route('/api/health', methods=['GET'])
-def health():
-    """
-    Health check endpoint — demonstrates distributed system availability.
-    In a real cloud deployment, this would be behind a load balancer.
-    """
-    return jsonify({
-        'status': 'healthy',
-        'service': 'SoilAI Cloud Lab API',
-        'version': '1.0.0',
-        'timestamp': datetime.utcnow().isoformat() + 'Z',
-        'computing_nodes': {
-            'api_server': 'Flask/Python (Local / Cloud-deployable)',
-            'database': 'Firebase Firestore (Distributed NoSQL)',
-            'auth': 'Firebase Authentication (Federated Identity)',
-            'storage': 'Firebase Storage (Cloud Object Store)'
-        },
-        'distributed_features': [
-            'Real-time Firestore synchronization',
-            'Multi-user concurrent access',
-            'Cloud-based persistent storage',
-            'Cross-device session management',
-            'Automatic conflict resolution via Firestore'
-        ]
-    })
-
-
-@app.route('/api/system-info', methods=['GET'])
-def system_info():
-    """
-    System information endpoint for the distributed computing dashboard panel.
-    """
-    return jsonify({
-        'system': 'SoilAI Cloud Lab',
-        'architecture': 'Distributed Multi-Tier',
-        'tiers': {
-            'presentation': 'HTML5/CSS3/Vanilla JS (CDN-deployable)',
-            'application': 'Flask REST API (Python)',
-            'data': 'Firebase Firestore (Google Cloud NoSQL)',
-            'identity': 'Firebase Auth (OAuth2 / JWT)'
-        },
-        'cloud_features': {
-            'real_time_sync': 'Firestore onSnapshot listeners',
-            'authentication': 'Firebase Auth with JWT tokens',
-            'scalability': 'Horizontal scaling via Firebase',
-            'availability': '99.99% SLA (Firebase)',
-            'geo_replication': 'Multi-region Firestore'
-        }
-    })
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# API: Sample Data (for demo/testing)
-# ──────────────────────────────────────────────────────────────────────────────
-
-@app.route('/api/sample-data', methods=['GET'])
-def sample_data():
-    """Return sample soil test data for demonstration."""
-    sample_trials = [
-        {"W1": 25.0, "W2": 162.5, "W3": 150.0, "wet_density": 1.87, "trial_number": 1},
-        {"W1": 25.0, "W2": 165.0, "W3": 150.0, "wet_density": 2.07, "trial_number": 2},
-        {"W1": 25.0, "W2": 167.5, "W3": 150.0, "wet_density": 2.19, "trial_number": 3},
-        {"W1": 25.0, "W2": 170.0, "W3": 150.0, "wet_density": 2.18, "trial_number": 4},
-        {"W1": 25.0, "W2": 172.5, "W3": 150.0, "wet_density": 2.065, "trial_number": 5},
+    output = io.BytesIO()
+    document = SimpleDocTemplate(
+        output, pagesize=A4, rightMargin=18 * mm, leftMargin=18 * mm,
+        topMargin=18 * mm, bottomMargin=18 * mm,
+        title=f"SoilAI Report - {report.test_name}",
+    )
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("SoilAI Cloud Lab — Compaction Report", styles["Title"]),
+        Paragraph("ASTM D698 / IS 2720 · Standard Proctor Test", styles["Heading2"]),
+        Paragraph(f"Test: {escape(report.test_name)}", styles["BodyText"]),
+        Paragraph(f"Soil type: {escape(report.soil_type)}", styles["BodyText"]),
+        Paragraph(
+            f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}",
+            styles["BodyText"],
+        ),
+        Spacer(1, 6 * mm),
     ]
 
-    try:
-        results = process_soil_test(sample_trials)
-        return jsonify({
-            'success': True,
-            'sample_trials': sample_trials,
-            'results': results,
-            'note': 'Sample data for demonstration purposes'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    rows = [["Container", "W1 (g)", "W2 (g)", "W3 (g)", "Wet density", "MC (%)", "Dry density"]]
+    for index, trial in enumerate(report.trials, start=1):
+        rows.append([
+            str(trial.container_no or index),
+            f"{trial.W1:.2f}",
+            f"{trial.W2:.2f}",
+            f"{trial.W3:.2f}",
+            f"{trial.wet_density:.3f}",
+            f"{trial.moisture_content:.2f}",
+            f"{trial.dry_density:.3f}",
+        ])
+    table = Table(rows, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#9aa9bb")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#edf3f8")]),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.extend([
+        table,
+        Spacer(1, 8 * mm),
+        Paragraph("Engineering Summary", styles["Heading2"]),
+        Paragraph(f"OMC: {report.omc:.2f}%", styles["BodyText"]),
+        Paragraph(f"MDD: {report.mdd:.3f} g/cm³", styles["BodyText"]),
+        Paragraph(
+            f"Subgrade suitability: {escape(str(report.evaluation.get('subgrade_suitability', 'Not available')))}",
+            styles["BodyText"],
+        ),
+        Paragraph(
+            f"Moisture control window: {escape(str(report.evaluation.get('moisture_control_window', 'Not available')))}",
+            styles["BodyText"],
+        ),
+    ])
+    document.build(story)
+    output.seek(0)
+    return send_file(
+        output, mimetype="application/pdf", as_attachment=True,
+        download_name="SoilAI_Compaction_Report.pdf",
+    )
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Error Handlers
-# ──────────────────────────────────────────────────────────────────────────────
+@app.get("/api/health")
+def health():
+    return jsonify({
+        "status": "healthy",
+        "service": "SoilAI local calculation API",
+        "version": "2.0.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.get("/api/system-info")
+def system_info():
+    return jsonify({
+        "system": "SoilAI Cloud Lab",
+        "architecture": "Local-first Flask and browser application",
+        "tiers": {
+            "presentation": "HTML5/CSS3/Vanilla JS",
+            "application": "Flask REST API",
+            "numerical_engine": "NumPy polynomial fitting",
+            "estimator": "Local empirical plasticity-index correlation",
+        },
+    })
+
+
+@app.get("/api/sample-data")
+def sample_data():
+    sample_trials = [
+        {"W1": 25.0, "W2": 162.5, "W3": 150.0, "wet_density": 1.87},
+        {"W1": 25.0, "W2": 165.0, "W3": 150.0, "wet_density": 2.07},
+        {"W1": 25.0, "W2": 167.5, "W3": 150.0, "wet_density": 2.19},
+        {"W1": 25.0, "W2": 170.0, "W3": 150.0, "wet_density": 2.18},
+        {"W1": 25.0, "W2": 172.5, "W3": 150.0, "wet_density": 2.065},
+    ]
+    results = process_soil_test(sample_trials)
+    return jsonify({"success": True, "sample_trials": sample_trials, "results": results})
+
 
 @app.errorhandler(404)
-def not_found(e):
-    return jsonify({'error': 'Endpoint not found', 'status': 404}), 404
+def not_found(_error):
+    return jsonify({"success": False, "error": "Endpoint not found"}), 404
+
 
 @app.errorhandler(405)
-def method_not_allowed(e):
-    return jsonify({'error': 'Method not allowed', 'status': 405}), 405
-
-@app.errorhandler(500)
-def internal_error(e):
-    return jsonify({'error': 'Internal server error', 'status': 500}), 500
+def method_not_allowed(_error):
+    return jsonify({"success": False, "error": "Method not allowed"}), 405
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Entry Point
-# ──────────────────────────────────────────────────────────────────────────────
-
-if __name__ == '__main__':
-    print("=" * 60)
-    print("  SoilAI Cloud Lab - Geotechnical Analytics Platform")
-    print("  Cloud Computing & Distributed Systems Demo")
-    print("=" * 60)
-    print(f"  Server: http://localhost:5000")
-    print(f"  API Health: http://localhost:5000/api/health")
-    print(f"  Dashboard: http://localhost:5000/dashboard")
-    print("=" * 60)
-    app.run(debug=True, host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    host = os.environ.get("SOILAI_HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", os.environ.get("SOILAI_PORT", "5000")))
+    debug = os.environ.get("SOILAI_DEBUG", "false").strip().lower() in {"1", "true", "yes"}
+    app.run(debug=debug, host=host, port=port)

@@ -147,7 +147,8 @@ function updateRecentTestsTable(tests) {
     return;
   }
 
-  tbody.innerHTML = tests.map((test, i) => {
+  tbody.replaceChildren();
+  tests.forEach((test, i) => {
     const date = test.createdAt?.toDate ? test.createdAt.toDate() : new Date();
     const dateStr = date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
     const mc  = test.results?.average_moisture_content?.toFixed(2) || '—';
@@ -156,22 +157,42 @@ function updateRecentTestsTable(tests) {
     const mdd = test.results?.mdd?.toFixed(3) || '—';
     const statusClass = getStatusClass(test.results?.status);
 
-    return `
-      <tr class="fade-in" style="animation-delay:${i * 0.05}s">
-        <td><span class="test-id">#${test.id.slice(-6).toUpperCase()}</span></td>
-        <td><span class="test-name">${test.testName || 'Soil Test'}</span></td>
-        <td>${dateStr}</td>
-        <td><span class="value-badge mc">${mc}%</span></td>
-        <td><span class="value-badge dd">${dd}</span></td>
-        <td>
-          <div class="omc-mdd">
-            <span class="omc-val">${omc}%</span>
-            <span class="mdd-val">${mdd}</span>
-          </div>
-        </td>
-        <td><span class="status-badge ${statusClass}">${formatStatus(test.results?.status)}</span></td>
-      </tr>`;
-  }).join('');
+    const row = document.createElement('tr');
+    row.className = 'fade-in';
+    row.style.animationDelay = `${i * 0.05}s`;
+    const makeCell = (value, className) => {
+      const cell = document.createElement('td');
+      if (className) {
+        const span = document.createElement('span');
+        span.className = className;
+        span.textContent = value;
+        cell.appendChild(span);
+      } else {
+        cell.textContent = value;
+      }
+      return cell;
+    };
+    row.append(
+      makeCell(`#${test.id.slice(-6).toUpperCase()}`, 'test-id'),
+      makeCell(test.testName || 'Soil Test', 'test-name'),
+      makeCell(dateStr),
+      makeCell(`${mc}%`, 'value-badge mc'),
+      makeCell(dd, 'value-badge dd'),
+    );
+    const peakCell = document.createElement('td');
+    const peakValues = document.createElement('div');
+    peakValues.className = 'omc-mdd';
+    const omcValue = document.createElement('span');
+    omcValue.className = 'omc-val';
+    omcValue.textContent = `${omc}%`;
+    const mddValue = document.createElement('span');
+    mddValue.className = 'mdd-val';
+    mddValue.textContent = mdd;
+    peakValues.append(omcValue, mddValue);
+    peakCell.appendChild(peakValues);
+    row.append(peakCell, makeCell(formatStatus(test.results?.status), `status-badge ${statusClass}`));
+    tbody.appendChild(row);
+  });
 }
 
 // ─── Dashboard Chart ──────────────────────────────────────────────────────────
@@ -182,12 +203,10 @@ function updateDashboardChart(tests) {
   const testWithTrials = tests.find(t => t.trials && t.trials.length >= 2);
   if (!testWithTrials) return;
 
-  const labels = testWithTrials.trials.map(t => t.moisture_content?.toFixed(2) + '%');
-  const data   = testWithTrials.trials.map(t => t.dry_density);
-  const omc    = testWithTrials.results?.omc;
-  const mdd    = testWithTrials.results?.mdd;
-
-  renderCompactionChart('dashboard-chart', labels, data, omc, mdd, true);
+  const results = testWithTrials.results || {};
+  const fit = results.fit || results.regression_fit;
+  const fitData = fit ? { ...fit, omc: results.omc, mdd: results.mdd } : null;
+  renderCompactionChart('dashboard-chart', testWithTrials.trials, fitData, results.zav_curve || [], true);
 }
 
 // ─── Activity Feed ────────────────────────────────────────────────────────────
@@ -196,21 +215,34 @@ function updateActivityFeed(activities) {
   if (!feed) return;
 
   if (activities.length === 0) {
-    feed.innerHTML = `<div class="activity-empty">No recent activity</div>`;
+    feed.replaceChildren();
+    const empty = document.createElement('div');
+    empty.className = 'activity-empty';
+    empty.textContent = 'No recent activity';
+    feed.appendChild(empty);
     return;
   }
 
-  feed.innerHTML = activities.map(a => {
+  feed.replaceChildren();
+  activities.forEach(a => {
     const time = a.timestamp?.toDate ? timeAgo(a.timestamp.toDate()) : 'just now';
-    return `
-      <div class="activity-item fade-in">
-        <div class="activity-icon ${a.type || 'info'}">${getActivityIcon(a.action)}</div>
-        <div class="activity-content">
-          <p class="activity-text">${a.message}</p>
-          <span class="activity-time">${time}</span>
-        </div>
-      </div>`;
-  }).join('');
+    const item = document.createElement('div');
+    item.className = 'activity-item fade-in';
+    const icon = document.createElement('div');
+    icon.className = `activity-icon ${['success', 'warning', 'error', 'info'].includes(a.type) ? a.type : 'info'}`;
+    icon.textContent = getActivityIcon(a.action);
+    const content = document.createElement('div');
+    content.className = 'activity-content';
+    const message = document.createElement('p');
+    message.className = 'activity-text';
+    message.textContent = a.message || '';
+    const timestamp = document.createElement('span');
+    timestamp.className = 'activity-time';
+    timestamp.textContent = time;
+    content.append(message, timestamp);
+    item.append(icon, content);
+    feed.appendChild(item);
+  });
 }
 
 // ─── System Status Panel ──────────────────────────────────────────────────────
